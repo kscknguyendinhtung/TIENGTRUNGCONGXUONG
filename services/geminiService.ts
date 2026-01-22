@@ -1,9 +1,8 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { SentenceAnalysis } from "../types";
 
 // Khởi tạo AI trực tiếp với key từ môi trường
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
 
 export const analyzeImageAndExtractText = async (base64Images: string[]): Promise<SentenceAnalysis[]> => {
   const imageParts = base64Images.map(base64 => ({
@@ -11,7 +10,7 @@ export const analyzeImageAndExtractText = async (base64Images: string[]): Promis
   }));
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.0-flash-exp', // Sử dụng model mạnh nhất cho OCR
+    model: 'gemini-3-flash-preview', 
     contents: {
       parts: [
         ...imageParts,
@@ -57,7 +56,8 @@ export const analyzeImageAndExtractText = async (base64Images: string[]): Promis
   });
 
   try {
-    return JSON.parse(response.text || "[]");
+    const text = response.text || "[]";
+    return JSON.parse(text);
   } catch (e) {
     console.error("Lỗi parse JSON Gemini:", e);
     return [];
