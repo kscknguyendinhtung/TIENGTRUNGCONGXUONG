@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { analyzeImageAndExtractText, speakText } from '../services/geminiService';
 import { SentenceAnalysis } from '../types';
@@ -165,7 +164,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
             <h3 className="text-8xl font-black mb-8 chinese-font text-slate-950 tracking-tighter">{selectedWord.text}</h3>
             <div className="flex flex-col gap-2 mb-10">
               <span className="text-blue-600 font-black text-2xl uppercase tracking-tighter">{selectedWord.pinyin}</span>
-              <span className="text-red-500 font-black text-xl uppercase tracking-widest">{selectedWord.hanViet}</span>
+              <span className="text-rose-500 font-black text-xl uppercase tracking-widest">{selectedWord.hanViet}</span>
             </div>
             <p className="text-slate-600 text-xl font-bold mb-10 leading-tight">{selectedWord.meaning}</p>
             <div className="flex gap-4">

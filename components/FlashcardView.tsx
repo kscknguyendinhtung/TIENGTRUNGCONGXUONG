@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Flashcard, SentenceAnalysis } from '../types';
 import { speakText } from '../services/geminiService';
@@ -50,7 +49,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     }
   }, [currentUser]);
 
-  // Logic lọc và xáo trộn từ vựng
   const filteredCards = useMemo(() => {
     let result = studyFilter === 'unmastered' ? cards.filter(c => !c.mastered) : cards;
     return result;
@@ -64,13 +62,11 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
 
   const currentCard = displayCards[currentIndex] || null;
 
-  // Reset index khi bộ lọc thay đổi
   useEffect(() => {
     setCurrentIndex(0);
     setIsFlipped(false);
   }, [studyFilter, isRandom]);
 
-  // Auto Speak Logic
   useEffect(() => {
     if (isAutoSpeak && currentCard && viewMode === 'card') {
       const textToSpeak = !isFlipped 
@@ -82,7 +78,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     }
   }, [currentIndex, isFlipped, frontMode, isAutoSpeak, viewMode, playbackSpeed]);
 
-  // Auto Play Logic
   useEffect(() => {
     if (isAutoPlay && viewMode === 'card' && displayCards.length > 0) {
       timerRef.current = setInterval(() => {
@@ -118,14 +113,13 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     <div className="p-4 max-w-md mx-auto pb-32">
       <div className="flex flex-col gap-4 mb-8">
         <div className="flex justify-between items-center">
-          <h2 className="text-2xl font-black text-red-600 uppercase tracking-tighter">Flashcards</h2>
+          <h2 className="text-2xl font-black text-rose-600 uppercase tracking-tighter">Flashcards</h2>
           <div className="bg-slate-100 p-1.5 rounded-2xl flex">
-            <button onClick={() => setViewMode('card')} className={`px-5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'card' ? 'bg-white shadow-sm text-red-600' : 'text-slate-400'}`}>THẺ</button>
-            <button onClick={() => setViewMode('list')} className={`px-5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-red-600' : 'text-slate-400'}`}>DANH SÁCH</button>
+            <button onClick={() => setViewMode('card')} className={`px-5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'card' ? 'bg-white shadow-sm text-rose-600' : 'text-slate-400'}`}>THẺ</button>
+            <button onClick={() => setViewMode('list')} className={`px-5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-rose-600' : 'text-slate-400'}`}>DANH SÁCH</button>
           </div>
         </div>
 
-        {/* BỘ LỌC HỌC TỪ */}
         <div className="flex gap-2 bg-slate-100 p-1.5 rounded-[20px]">
           <button 
             onClick={() => setStudyFilter('all')} 
@@ -135,7 +129,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
           </button>
           <button 
             onClick={() => setStudyFilter('unmastered')} 
-            className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${studyFilter === 'unmastered' ? 'bg-white shadow-sm text-red-600' : 'text-slate-400'}`}
+            className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${studyFilter === 'unmastered' ? 'bg-white shadow-sm text-rose-600' : 'text-slate-400'}`}
           >
             CHƯA THUỘC ({cards.filter(c => !c.mastered).length})
           </button>
@@ -144,7 +138,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         <div className="grid grid-cols-2 gap-2">
           <button 
             onClick={() => setFrontMode(frontMode === 'chinese' ? 'vietnamese' : 'chinese')}
-            className={`py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all border-2 ${frontMode === 'chinese' ? 'bg-blue-50 border-blue-100 text-blue-600' : 'bg-red-50 border-red-100 text-red-600'}`}
+            className={`py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all border-2 ${frontMode === 'chinese' ? 'bg-blue-50 border-blue-100 text-blue-600' : 'bg-rose-50 border-rose-100 text-rose-600'}`}
           >
             Mặt trước: {frontMode === 'chinese' ? 'HÁN TỰ' : 'NGHĨA'}
           </button>
@@ -164,7 +158,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
               </div>
               <button 
                 onClick={() => setIsAutoPlay(!isAutoPlay)}
-                className={`px-6 py-2 rounded-full text-[9px] font-black transition-all ${isAutoPlay ? 'bg-red-500 text-white' : 'bg-white text-slate-900'}`}
+                className={`px-6 py-2 rounded-full text-[9px] font-black transition-all ${isAutoPlay ? 'bg-rose-500 text-white' : 'bg-white text-slate-900'}`}
               >
                 {isAutoPlay ? 'DỪNG' : 'BẮT ĐẦU'}
               </button>
@@ -176,7 +170,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
                 type="range" min="0.5" max="2.0" step="0.1" 
                 value={playbackSpeed} 
                 onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
-                className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-red-500"
+                className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-rose-500"
               />
               <span className="text-[10px] font-black w-8 text-right">{playbackSpeed}x</span>
            </div>
@@ -214,9 +208,8 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
             className="w-full h-[480px] relative transition-all duration-500 cursor-pointer"
             onClick={() => setIsFlipped(!isFlipped)}
           >
-            {/* FRONT SIDE */}
             <div className={`absolute inset-0 transition-all duration-700 ${isFlipped ? 'opacity-0 pointer-events-none [transform:rotateY(180deg)] scale-90' : 'opacity-100 scale-100 [transform:rotateY(0deg)]'}`}>
-              <div className="h-full bg-white border-b-8 border-red-500 rounded-[56px] shadow-2xl flex flex-col items-center justify-center p-10 text-center relative overflow-hidden">
+              <div className="h-full bg-white border-b-8 border-rose-500 rounded-[56px] shadow-2xl flex flex-col items-center justify-center p-10 text-center relative overflow-hidden">
                 <span className={`absolute top-10 right-10 text-[9px] font-black px-4 py-2 rounded-full tracking-[0.2em] uppercase ${currentCard.mastered ? 'bg-green-100 text-green-600' : 'bg-slate-50 text-slate-300'}`}>
                   {currentCard.mastered ? 'ĐÃ THUỘC' : 'CHƯA THUỘC'}
                 </span>
@@ -237,7 +230,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
                     <h2 className="text-4xl font-black text-slate-800 tracking-tight leading-tight px-4">{currentCard.meaning}</h2>
                     <button 
                       onClick={(e) => { e.stopPropagation(); speakText(currentCard.meaning, 'vn', playbackSpeed); }}
-                      className="mt-12 w-16 h-16 flex items-center justify-center bg-slate-50 text-slate-400 rounded-2xl hover:bg-red-50 hover:text-red-600 transition-all border border-slate-100 shadow-sm"
+                      className="mt-12 w-16 h-16 flex items-center justify-center bg-slate-50 text-slate-400 rounded-2xl hover:bg-rose-50 hover:text-rose-600 transition-all border border-slate-100 shadow-sm"
                     >
                       <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
                     </button>
@@ -246,7 +239,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
               </div>
             </div>
 
-            {/* BACK SIDE */}
             <div className={`absolute inset-0 transition-all duration-700 ${!isFlipped ? 'opacity-0 pointer-events-none [transform:rotateY(-180deg)] scale-90' : 'opacity-100 scale-100 [transform:rotateY(0deg)]'}`}>
               <div className="h-full bg-slate-900 rounded-[56px] shadow-2xl flex flex-col items-center justify-center p-12 text-white border-b-8 border-blue-500 text-center relative">
                 {frontMode === 'chinese' ? (
@@ -266,11 +258,11 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
                 ) : (
                   <>
                     <h1 className="text-8xl font-black text-white chinese-font mb-6 tracking-tighter">{currentCard.word}</h1>
-                    <p className="text-2xl text-red-500 font-black uppercase tracking-widest mb-4">{currentCard.pinyin}</p>
+                    <p className="text-2xl text-rose-500 font-black uppercase tracking-widest mb-4">{currentCard.pinyin}</p>
                     <p className="text-blue-400 font-black text-xl uppercase tracking-widest mb-10">{currentCard.hanViet}</p>
                     <button 
                       onClick={(e) => { e.stopPropagation(); speakText(currentCard.word, 'cn', playbackSpeed); }}
-                      className="w-16 h-16 flex items-center justify-center bg-slate-800 text-slate-500 rounded-2xl hover:bg-red-600 hover:text-white transition-all shadow-lg"
+                      className="w-16 h-16 flex items-center justify-center bg-slate-800 text-slate-500 rounded-2xl hover:bg-rose-600 hover:text-white transition-all shadow-lg"
                     >
                       <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
                     </button>
@@ -285,18 +277,18 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
             <button onClick={() => toggleMastery(currentCard)} className={`flex-1 py-6 rounded-3xl font-black text-[10px] tracking-widest shadow-xl transition-all ${currentCard.mastered ? 'bg-green-500 text-white' : 'bg-slate-200 text-slate-600 active:bg-slate-300'}`}>
               {currentCard.mastered ? 'ĐÃ THUỘC' : 'GHI NHỚ'}
             </button>
-            <button className="flex-1 bg-red-600 text-white py-6 rounded-3xl font-black text-[10px] tracking-widest shadow-xl active:scale-95 transition" onClick={() => { setIsFlipped(false); setCurrentIndex(prev => prev < displayCards.length - 1 ? prev + 1 : 0); }}>SAU</button>
+            <button className="flex-1 bg-rose-600 text-white py-6 rounded-3xl font-black text-[10px] tracking-widest shadow-xl active:scale-95 transition" onClick={() => { setIsFlipped(false); setCurrentIndex(prev => prev < displayCards.length - 1 ? prev + 1 : 0); }}>SAU</button>
           </div>
         </div>
       ) : viewMode === 'list' ? (
         <div className="space-y-4 pb-24">
           {displayCards.map((card, idx) => (
-            <div key={idx} className="bg-white p-7 rounded-[40px] border border-slate-100 flex items-center justify-between group hover:shadow-xl hover:border-red-100 transition-all active:scale-[0.98]">
+            <div key={idx} className="bg-white p-7 rounded-[40px] border border-slate-100 flex items-center justify-between group hover:shadow-xl hover:border-rose-100 transition-all active:scale-[0.98]">
               <div className="flex items-center gap-6">
                 <span className="text-4xl font-black chinese-font text-slate-900">{card.word}</span>
                 <div>
                   <div className="flex items-center gap-3 mb-1.5">
-                    <span className="text-sm font-black text-red-600 uppercase tracking-tighter">{card.pinyin}</span>
+                    <span className="text-sm font-black text-rose-600 uppercase tracking-tighter">{card.pinyin}</span>
                     <span className="text-[9px] font-black bg-blue-50 text-blue-600 px-3 py-1 rounded-full uppercase tracking-widest">{card.hanViet}</span>
                   </div>
                   <p className="text-base font-bold text-slate-500 leading-tight">{card.meaning}</p>

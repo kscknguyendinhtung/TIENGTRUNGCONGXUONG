@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { analyzeImageAndExtractText, speakText } from '../services/geminiService';
 import { SentenceAnalysis } from '../types';
@@ -61,23 +60,20 @@ export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser }) => {
       <div className="space-y-8">
         {data.map((s, idx) => (
           <div key={idx} className="bg-white p-8 rounded-[40px] shadow-sm border border-slate-100 border-l-[12px] border-l-emerald-500 overflow-hidden">
-            {/* Header mục */}
             <div className="mb-6 flex items-center justify-between">
               <span className="text-[10px] font-black bg-slate-900 text-white px-4 py-1.5 rounded-full uppercase tracking-widest">BÀI HỌC {idx + 1}</span>
             </div>
 
-            {/* Khối Ruby-style words */}
             <div className="flex flex-wrap gap-x-5 gap-y-10 mb-10 items-end">
               {s.words.map((w, wIdx) => (
                 <div key={wIdx} className="flex flex-col items-center cursor-pointer group" onClick={() => setSelectedWord(w)}>
-                  <span className="text-[9px] text-red-500 font-black mb-1.5 uppercase tracking-tighter leading-none">{w.pinyin}</span>
+                  <span className="text-[9px] text-rose-500 font-black mb-1.5 uppercase tracking-tighter leading-none">{w.pinyin}</span>
                   <span className="text-3xl font-black chinese-font group-hover:text-emerald-600 transition-colors leading-none">{w.text}</span>
                   <span className="text-[9px] text-slate-300 font-bold uppercase mt-2 tracking-widest leading-none">{w.hanViet}</span>
                 </div>
               ))}
             </div>
             
-            {/* Phân tích ngữ pháp chi tiết */}
             <div className="bg-slate-50 p-8 rounded-[32px] border border-slate-100 relative">
               <div className="absolute top-0 right-10 translate-y-[-50%] bg-emerald-500 text-white px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest shadow-md">
                 Cấu trúc điểm nhấn
@@ -105,7 +101,7 @@ export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser }) => {
             <h3 className="text-7xl font-black mb-6 chinese-font text-slate-800 tracking-tighter">{selectedWord.text}</h3>
             <div className="flex flex-col items-center gap-1 mb-8">
               <p className="text-emerald-600 font-black text-2xl uppercase tracking-tighter">{selectedWord.pinyin}</p>
-              <p className="text-red-500 font-black text-xl uppercase tracking-[0.2em]">{selectedWord.hanViet}</p>
+              <p className="text-rose-500 font-black text-xl uppercase tracking-[0.2em]">{selectedWord.hanViet}</p>
             </div>
             <p className="text-slate-600 text-xl font-bold mb-10 leading-snug">{selectedWord.meaning}</p>
             <div className="grid grid-cols-2 gap-4">

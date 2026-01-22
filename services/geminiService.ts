@@ -2,25 +2,28 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { SentenceAnalysis } from "../types";
 
+// Khởi tạo AI trực tiếp với key từ môi trường
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// OCR & Phân tích hình ảnh bằng Gemini vẫn được giữ nguyên
 export const analyzeImageAndExtractText = async (base64Images: string[]): Promise<SentenceAnalysis[]> => {
   const imageParts = base64Images.map(base64 => ({
     inlineData: { data: base64, mimeType: 'image/jpeg' }
   }));
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-2.0-flash-exp', // Sử dụng model mạnh nhất cho OCR
     contents: {
       parts: [
         ...imageParts,
         { 
-          text: `NHIỆM VỤ OCR & TRÍCH XUẤT TỪ VỰNG TOÀN DIỆN:
-          1. OCR CHÍNH XÁC: Trích xuất 100% Hán tự.
-          2. TRÍCH XUẤT TỪ VỰNG CHI TIẾT: Phải bao gồm cả THỰC TỪ (danh, động, tính) và đặc biệt là HƯ TỪ (trợ từ 的, 地, 得, 了, 过, 吧, 呢, 吗...), TỪ NỐI (và, nhưng, vì vậy...), GIỚI TỪ.
-          3. THÔNG TIN: text, pinyin, meaning, hanViet.
-          4. NGỮ PHÁP: Giải thích kỹ các cấu trúc xuất hiện trong đoạn.` 
+          text: `NHIỆM VỤ: OCR tiếng Trung và phân tích từ vựng/ngữ pháp chi tiết.
+          YÊU CẦU:
+          1. Trích xuất text tiếng Trung chính xác.
+          2. Pinyin kèm dấu thanh.
+          3. Nghĩa tiếng Việt tự nhiên nhất.
+          4. HÁN VIỆT: Phải cung cấp âm Hán Việt chuẩn cho từng từ.
+          5. TỪ VỰNG: Chia nhỏ câu thành các từ/cụm từ ý nghĩa.
+          6. NGỮ PHÁP: Giải thích các cấu trúc quan trọng trong đoạn văn.` 
         }
       ]
     },
@@ -56,45 +59,19 @@ export const analyzeImageAndExtractText = async (base64Images: string[]): Promis
   try {
     return JSON.parse(response.text || "[]");
   } catch (e) {
+    console.error("Lỗi parse JSON Gemini:", e);
     return [];
   }
 };
 
-/**
- * SỬ DỤNG TTS CỦA TRÌNH DUYỆT (WEB SPEECH API)
- * Phản hồi tức thì, không có độ trễ mạng.
- */
 export const speakText = (text: string, lang: 'cn' | 'vn', speed: number = 1.0) => {
-  if (!('speechSynthesis' in window)) {
-    console.error("Trình duyệt không hỗ trợ TTS.");
-    return;
-  }
-
-  // Hủy các yêu cầu đọc đang dang dở để tránh xếp hàng quá lâu
+  if (!('speechSynthesis' in window)) return;
   window.speechSynthesis.cancel();
-
   const utterance = new SpeechSynthesisUtterance(text);
-  
-  // Thiết lập ngôn ngữ
   utterance.lang = lang === 'cn' ? 'zh-CN' : 'vi-VN';
-  
-  // Thiết lập tốc độ (0.1 đến 10)
   utterance.rate = speed;
-  
-  // Tìm kiếm giọng đọc phù hợp (nếu có)
-  const voices = window.speechSynthesis.getVoices();
-  const preferredVoice = voices.find(v => v.lang.includes(utterance.lang) && (v.name.includes('Google') || v.name.includes('Premium')));
-  if (preferredVoice) {
-    utterance.voice = preferredVoice;
-  }
-
   window.speechSynthesis.speak(utterance);
 };
-
-// Cần thiết để khởi tạo giọng đọc trên một số trình duyệt
-if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-  window.speechSynthesis.getVoices();
-}
 
 export const syncToGoogleSheets = async (scriptUrl: string, data: any) => {
   if (!scriptUrl || scriptUrl.includes("YOUR_SCRIPT_URL")) return false;
@@ -121,6 +98,3 @@ export const fetchFromGoogleSheets = async (scriptUrl: string, user: string) => 
     return null;
   }
 };
-
-// Mock function for compatibility (no longer needed for Web Speech API but keeps imports clean)
-export const initAudioContext = () => {};
