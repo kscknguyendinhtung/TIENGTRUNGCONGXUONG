@@ -1,0 +1,7 @@
+{
+  "name": "TIENGTRUNGCONGXUONG",
+  "description": "An advanced Chinese learning application featuring AI-powered OCR reading, grammar analysis, and flashcards.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
