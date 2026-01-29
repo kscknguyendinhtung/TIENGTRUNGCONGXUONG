@@ -2,9 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { analyzeImageAndExtractText, speakText } from '../services/geminiService';
 import { SentenceAnalysis } from '../types';
 
-interface GrammarViewProps { currentUser: string; }
+interface GrammarViewProps { 
+  currentUser: string;
+  onDataChange?: () => void;
+}
 
-export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser }) => {
+export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser, onDataChange }) => {
   const [data, setData] = useState<SentenceAnalysis[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedWord, setSelectedWord] = useState<any>(null);
@@ -29,9 +32,15 @@ export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser }) => {
     const base64Images = await Promise.all(base64Promises);
     try {
       const result = await analyzeImageAndExtractText(base64Images);
-      const updated = [...data, ...result];
+      const withIds = result.map((s, idx) => ({
+        ...s,
+        id: `grammar-${Date.now()}-${idx}`,
+        mastered: false
+      }));
+      const updated = [...data, ...withIds];
       setData(updated);
       localStorage.setItem(`reading_${currentUser}`, JSON.stringify(updated));
+      if (onDataChange) onDataChange();
     } catch (err) {
       alert("Lỗi phân tích ngữ pháp.");
     } finally {
@@ -42,10 +51,10 @@ export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser }) => {
   return (
     <div className="px-5 py-4 max-w-lg mx-auto pb-28">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-black text-emerald-600 tracking-tight uppercase">Ngữ pháp</h2>
+        <h2 className="text-xl font-black text-emerald-600 tracking-tight uppercase">Phân tích Ngữ pháp</h2>
         <div className="flex gap-2">
           <input type="file" id="grammar-upload" hidden multiple onChange={handleProcess} />
-          <label htmlFor="grammar-upload" className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-[9px] font-black cursor-pointer shadow-lg shadow-emerald-100 active:scale-95 transition-all uppercase tracking-widest">
+          <label htmlFor="grammar-upload" className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-[9px] font-black cursor-pointer shadow-lg active:scale-95 transition-all uppercase tracking-widest">
             {loading ? 'ĐANG QUÉT...' : 'QUÉT NGỮ PHÁP'}
           </label>
         </div>
@@ -53,13 +62,13 @@ export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser }) => {
 
       {data.length === 0 && (
         <div className="text-center py-16 bg-emerald-50 rounded-[32px] border-2 border-dashed border-emerald-100">
-           <p className="text-emerald-300 font-black text-[10px] uppercase tracking-widest">Chưa có dữ liệu</p>
+           <p className="text-emerald-300 font-black text-[10px] uppercase tracking-widest">Chưa có dữ liệu bài học</p>
         </div>
       )}
 
       <div className="space-y-6">
         {data.map((s, idx) => (
-          <div key={idx} className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 border-l-[8px] border-l-emerald-500 overflow-hidden">
+          <div key={s.id || idx} className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 border-l-[8px] border-l-emerald-500 overflow-hidden">
             <div className="mb-5 flex items-center justify-between">
               <span className="text-[8px] font-black bg-slate-900 text-white px-3 py-1 rounded-full uppercase tracking-widest">BÀI {idx + 1}</span>
             </div>

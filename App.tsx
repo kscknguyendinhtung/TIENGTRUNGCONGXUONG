@@ -19,11 +19,13 @@ const App: React.FC = () => {
   const loadStats = useCallback((user: string) => {
     const readingData = JSON.parse(localStorage.getItem(`reading_${user}`) || '[]');
     const masteryData = JSON.parse(localStorage.getItem(`mastery_${user}`) || '{}');
+    const manualData = JSON.parse(localStorage.getItem(`manual_words_${user}`) || '[]');
     
     const uniqueWords = new Set();
     readingData.forEach((s: SentenceAnalysis) => {
       s.words?.forEach(w => uniqueWords.add(w.text));
     });
+    manualData.forEach((m: any) => uniqueWords.add(m.word));
 
     const masteredCount = Object.values(masteryData).filter(v => v === true).length;
 
@@ -49,6 +51,7 @@ const App: React.FC = () => {
       user: user,
       reading: JSON.parse(localStorage.getItem(`reading_${user}`) || '[]'),
       mastery: JSON.parse(localStorage.getItem(`mastery_${user}`) || '{}'),
+      manual_words: JSON.parse(localStorage.getItem(`manual_words_${user}`) || '[]'),
       timestamp: getHanoiTimestamp()
     };
     await syncToGoogleSheets(scriptUrl, data);
@@ -65,6 +68,7 @@ const App: React.FC = () => {
     if (cloudData) {
       if (cloudData.reading) localStorage.setItem(`reading_${user}`, JSON.stringify(cloudData.reading));
       if (cloudData.mastery) localStorage.setItem(`mastery_${user}`, JSON.stringify(cloudData.mastery));
+      if (cloudData.manual_words) localStorage.setItem(`manual_words_${user}`, JSON.stringify(cloudData.manual_words));
     }
     
     setSyncing(false);
@@ -114,7 +118,7 @@ const App: React.FC = () => {
     switch (activeTab) {
       case AppTab.VOCABULARY: return <FlashcardView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} />;
       case AppTab.READING: return <ReadingView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} />;
-      case AppTab.GRAMMAR: return <GrammarView currentUser={currentUser!} />;
+      case AppTab.GRAMMAR: return <GrammarView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} />;
       default:
         return (
           <div className="px-5 py-6 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -179,9 +183,9 @@ const App: React.FC = () => {
 
             <div className="grid gap-3 pt-1 pb-24">
               {[
-                { tab: AppTab.VOCABULARY, color: 'rose', char: '字', title: 'Học Từ Vựng', sub: 'Flashcards & Audio' },
-                { tab: AppTab.GRAMMAR, color: 'emerald', char: '法', title: 'Học Ngữ Pháp', sub: 'Grammar Analysis' },
-                { tab: AppTab.READING, color: 'blue', char: '阅', title: 'Luyện Đọc AI', sub: 'Scan & Translate' }
+                { tab: AppTab.VOCABULARY, color: 'rose', char: '字', title: 'Học Từ Vựng', sub: 'Flashcards & Mindmap' },
+                { tab: AppTab.GRAMMAR, color: 'emerald', char: '法', title: 'Học Ngữ Pháp', sub: 'Grammar AI Analysis' },
+                { tab: AppTab.READING, color: 'blue', char: '阅', title: 'Luyện Đọc AI', sub: 'OCR & Translation' }
               ].map(item => (
                 <button 
                   key={item.tab} 
@@ -196,7 +200,7 @@ const App: React.FC = () => {
                     </div>
                   </div>
                   <div className={`w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center text-slate-300`}>
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7"/></svg>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
                   </div>
                 </button>
               ))}
@@ -245,7 +249,7 @@ const App: React.FC = () => {
           ].map(item => (
             <button key={item.tab} onClick={() => setActiveTab(item.tab)} className={`flex flex-col items-center transition-all duration-300 ${activeTab === item.tab ? 'text-blue-600' : 'text-slate-300'}`}>
               <div className={`p-2.5 rounded-2xl transition-all ${activeTab === item.tab ? 'bg-blue-50' : 'bg-transparent'}`}>
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d={item.icon}/></svg>
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d={item.icon}/></svg>
               </div>
               <span className={`text-[8px] font-black mt-0.5 uppercase tracking-widest transition-opacity ${activeTab === item.tab ? 'opacity-100' : 'opacity-0'}`}>{item.label}</span>
             </button>

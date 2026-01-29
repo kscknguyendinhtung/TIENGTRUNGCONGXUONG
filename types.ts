@@ -6,9 +6,11 @@ export interface Flashcard {
   meaning: string;
   hanViet: string;
   mastered?: boolean;
+  isManual?: boolean;
 }
 
 export interface SentenceAnalysis {
+  id: string;
   chinese: string;
   pinyin: string;
   meaning: string;
@@ -18,6 +20,16 @@ export interface SentenceAnalysis {
     pinyin: string;
     meaning: string;
     hanViet: string;
+  }[];
+  mastered?: boolean;
+}
+
+export interface MindmapCategory {
+  name: string;
+  words: {
+    text: string;
+    pinyin: string;
+    meaning: string;
   }[];
 }
 

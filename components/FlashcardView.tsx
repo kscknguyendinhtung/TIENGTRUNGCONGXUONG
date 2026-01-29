@@ -1,6 +1,8 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Flashcard, SentenceAnalysis } from '../types';
 import { speakText } from '../services/geminiService';
+import { MindmapView } from './MindmapView';
 
 interface FlashcardViewProps { 
   currentUser: string; 
@@ -22,36 +24,56 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
   const [playbackSpeed, setPlaybackSpeed] = useState(1.1);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showMindmap, setShowMindmap] = useState(false);
+  const [newWord, setNewWord] = useState({ text: '', pinyin: '', meaning: '', hanViet: '' });
+
   useEffect(() => {
-    const localSentences = localStorage.getItem(`reading_${currentUser}`);
-    const localMastery = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
-    if (localSentences) {
-      const sentences: SentenceAnalysis[] = JSON.parse(localSentences);
-      const extractedCards: Flashcard[] = [];
-      
-      sentences.forEach(s => {
-        if (s.words && Array.isArray(s.words)) {
-          s.words.forEach(w => {
-            if (w.text && !extractedCards.find(c => c.word === w.text)) {
-              extractedCards.push({
-                id: `w-${w.text}-${Date.now()}`,
-                word: w.text,
-                pinyin: w.pinyin,
-                meaning: w.meaning,
-                hanViet: w.hanViet || '',
-                mastered: localMastery[w.text] || false
-              });
-            }
-          });
-        }
-      });
-      setCards(extractedCards);
-    }
+    loadCards();
   }, [currentUser]);
 
+  const loadCards = () => {
+    const localSentences = localStorage.getItem(`reading_${currentUser}`);
+    const localManual = localStorage.getItem(`manual_words_${currentUser}`);
+    const localMastery = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
+    
+    let extractedCards: Flashcard[] = [];
+    const wordSet = new Set<string>();
+
+    if (localSentences) {
+      const sentences: SentenceAnalysis[] = JSON.parse(localSentences);
+      sentences.forEach(s => {
+        s.words?.forEach(w => {
+          if (!wordSet.has(w.text)) {
+            wordSet.add(w.text);
+            extractedCards.push({
+              id: `w-${w.text}`,
+              word: w.text,
+              pinyin: w.pinyin,
+              meaning: w.meaning,
+              hanViet: w.hanViet || '',
+              mastered: localMastery[w.text] || false
+            });
+          }
+        });
+      });
+    }
+
+    if (localManual) {
+      const manual: Flashcard[] = JSON.parse(localManual);
+      manual.forEach(w => {
+        if (!wordSet.has(w.word)) {
+          wordSet.add(w.word);
+          extractedCards.push({ ...w, mastered: localMastery[w.word] || false });
+        }
+      });
+    }
+
+    setCards(extractedCards);
+  };
+
   const filteredCards = useMemo(() => {
-    let result = studyFilter === 'unmastered' ? cards.filter(c => !c.mastered) : cards;
-    return result;
+    return studyFilter === 'unmastered' ? cards.filter(c => !c.mastered) : cards;
   }, [cards, studyFilter]);
 
   const displayCards = useMemo(() => {
@@ -73,7 +95,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         ? (frontMode === 'chinese' ? currentCard.word : currentCard.meaning)
         : (frontMode === 'chinese' ? currentCard.meaning : currentCard.word);
       const lang = (!isFlipped ? frontMode === 'chinese' : frontMode !== 'chinese') ? 'cn' : 'vn';
-      
       speakText(textToSpeak, lang, playbackSpeed);
     }
   }, [currentIndex, isFlipped, frontMode, isAutoSpeak, viewMode, playbackSpeed]);
@@ -101,11 +122,50 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     if (onDataChange) onDataChange();
   };
 
-  if (cards.length === 0) return (
+  const deleteWord = (word: string) => {
+    if (!confirm(`Xóa từ "${word}" khỏi danh sách học?`)) return;
+    
+    // Xóa khỏi manual nếu có
+    const manual = JSON.parse(localStorage.getItem(`manual_words_${currentUser}`) || '[]');
+    const updatedManual = manual.filter((w: Flashcard) => w.word !== word);
+    localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
+
+    // Xóa khỏi tất cả các bài học reading
+    const reading = JSON.parse(localStorage.getItem(`reading_${currentUser}`) || '[]');
+    const updatedReading = reading.map((s: SentenceAnalysis) => ({
+      ...s,
+      words: s.words.filter(w => w.text !== word)
+    }));
+    localStorage.setItem(`reading_${currentUser}`, JSON.stringify(updatedReading));
+
+    loadCards();
+    if (onDataChange) onDataChange();
+  };
+
+  const addManualWord = () => {
+    if (!newWord.text || !newWord.meaning) return alert("Nhập ít nhất Hán tự và Nghĩa!");
+    const manual = JSON.parse(localStorage.getItem(`manual_words_${currentUser}`) || '[]');
+    const entry: Flashcard = {
+      id: `manual-${Date.now()}`,
+      word: newWord.text,
+      pinyin: newWord.pinyin,
+      meaning: newWord.meaning,
+      hanViet: newWord.hanViet,
+      isManual: true,
+      mastered: false
+    };
+    localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify([...manual, entry]));
+    setNewWord({ text: '', pinyin: '', meaning: '', hanViet: '' });
+    setShowAddModal(false);
+    loadCards();
+    if (onDataChange) onDataChange();
+  };
+
+  if (cards.length === 0 && !showAddModal) return (
     <div className="py-20 px-6 text-center flex flex-col items-center">
       <div className="text-6xl mb-6 opacity-20">🗂️</div>
       <h3 className="text-lg font-black text-slate-300 uppercase tracking-widest">Chưa có từ vựng</h3>
-      <p className="text-slate-400 mt-3 max-w-[200px] text-[10px] font-bold italic leading-relaxed">Hãy quét ảnh ở tab Luyện Đọc để tạo thẻ từ vựng.</p>
+      <button onClick={() => setShowAddModal(true)} className="mt-6 bg-rose-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest shadow-lg active:scale-95 uppercase">Thêm từ đầu tiên</button>
     </div>
   );
 
@@ -114,9 +174,17 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
       <div className="flex flex-col gap-3 mb-6">
         <div className="flex justify-between items-center">
           <h2 className="text-xl font-black text-rose-600 uppercase tracking-tighter">Flashcards</h2>
-          <div className="bg-slate-100 p-1 rounded-xl flex">
-            <button onClick={() => setViewMode('card')} className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'card' ? 'bg-white shadow-sm text-rose-600' : 'text-slate-400'}`}>THẺ</button>
-            <button onClick={() => setViewMode('list')} className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-rose-600' : 'text-slate-400'}`}>LIST</button>
+          <div className="flex gap-2">
+            <button onClick={() => setShowMindmap(true)} className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shadow-sm active:scale-90">
+               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            </button>
+            <button onClick={() => setShowAddModal(true)} className="w-10 h-10 bg-rose-50 text-rose-600 rounded-xl flex items-center justify-center shadow-sm active:scale-90">
+               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4"/></svg>
+            </button>
+            <div className="bg-slate-100 p-1 rounded-xl flex">
+              <button onClick={() => setViewMode('card')} className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'card' ? 'bg-white shadow-sm text-rose-600' : 'text-slate-400'}`}>THẺ</button>
+              <button onClick={() => setViewMode('list')} className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-rose-600' : 'text-slate-400'}`}>LIST</button>
+            </div>
           </div>
         </div>
 
@@ -222,12 +290,56 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
                 </div>
               </div>
               <div className="flex gap-1.5">
+                <button onClick={() => deleteWord(card.word)} className="w-10 h-10 rounded-xl flex items-center justify-center bg-rose-50 text-rose-400 transition-all opacity-0 group-hover:opacity-100">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
                 <button onClick={() => toggleMastery(card)} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${card.mastered ? 'bg-green-500 text-white' : 'bg-slate-50 text-slate-300'}`}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7"/></svg></button>
               </div>
             </div>
           ))}
         </div>
       ) : null}
+
+      {showAddModal && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl flex items-center justify-center p-6 z-[150]">
+          <div className="bg-white w-full max-w-sm p-8 rounded-[40px] shadow-2xl">
+            <h2 className="text-2xl font-black mb-1 text-slate-900 tracking-tighter uppercase">Thêm từ vựng</h2>
+            <p className="text-slate-400 text-[10px] font-bold mb-8 uppercase tracking-wider">Nhập thông tin từ mới.</p>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Hán tự</label>
+                <input type="text" value={newWord.text} onChange={(e) => setNewWord({...newWord, text: e.target.value})} className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Pinyin</label>
+                  <input type="text" value={newWord.pinyin} onChange={(e) => setNewWord({...newWord, pinyin: e.target.value})} className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Hán Việt</label>
+                  <input type="text" value={newWord.hanViet} onChange={(e) => setNewWord({...newWord, hanViet: e.target.value})} className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs" />
+                </div>
+              </div>
+              <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Nghĩa tiếng Việt</label>
+                <input type="text" value={newWord.meaning} onChange={(e) => setNewWord({...newWord, meaning: e.target.value})} className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs" />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-8">
+               <button onClick={() => setShowAddModal(false)} className="flex-1 py-4 bg-slate-100 text-slate-400 rounded-2xl font-black text-[10px] tracking-widest uppercase">Hủy</button>
+               <button onClick={addManualWord} className="flex-1 py-4 bg-rose-600 text-white rounded-2xl font-black text-[10px] tracking-widest shadow-lg uppercase">Thêm</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMindmap && (
+        <MindmapView 
+          user={currentUser} 
+          words={cards.map(c => ({ text: c.word, pinyin: c.pinyin, meaning: c.meaning }))} 
+          onClose={() => setShowMindmap(false)} 
+        />
+      )}
     </div>
   );
 };
