@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { analyzeImageAndExtractText, speakText } from '../services/geminiService';
 import { SentenceAnalysis } from '../types';
@@ -18,21 +19,25 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
   useEffect(() => {
     const saved = localStorage.getItem(`reading_${currentUser}`);
     if (saved) {
-      const parsed = JSON.parse(saved);
-      const withIds = parsed.map((s: any, idx: number) => ({
-        ...s,
-        id: s.id || `read-${idx}-${Date.now()}`
-      }));
-      setSentences(withIds);
+      try {
+        const parsed = JSON.parse(saved);
+        // Đảm bảo tất cả item đều có ID hợp lệ
+        const withIds = parsed.map((s: any, idx: number) => ({
+          ...s,
+          id: s.id || `read-${idx}-${Date.now()}`
+        }));
+        setSentences(withIds);
+      } catch (e) {
+        setSentences([]);
+      }
     } else {
       setSentences([]);
     }
   }, [currentUser]);
 
-  const save = (data: SentenceAnalysis[]) => {
-    setSentences(data);
+  const saveAndNotify = (data: SentenceAnalysis[]) => {
     localStorage.setItem(`reading_${currentUser}`, JSON.stringify(data));
-    // Trigger callback to App so stats and cloud are updated
+    setSentences([...data]); // Force re-render with fresh array copy
     if (onDataChange) onDataChange();
   };
 
@@ -53,10 +58,11 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
       const result = await analyzeImageAndExtractText(base64Images);
       const newSentences = result.map((s, idx) => ({ 
         ...s, 
-        id: `read-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 5)}`, 
+        id: `read-${Date.now()}-${idx}-${Math.floor(Math.random() * 10000)}`, 
         mastered: false 
       }));
-      save([...sentences, ...newSentences]);
+      const updated = [...sentences, ...newSentences];
+      saveAndNotify(updated);
     } catch (err) {
       alert("Lỗi phân tích hình ảnh.");
     } finally {
@@ -67,13 +73,13 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
 
   const toggleMastered = (id: string) => {
     const updated = sentences.map(s => s.id === id ? { ...s, mastered: !s.mastered } : s);
-    save(updated);
+    saveAndNotify(updated);
   };
 
   const deleteLesson = (id: string) => {
-    if (window.confirm("Xóa bài học này? Dữ liệu từ vựng liên quan sẽ bị gỡ bỏ.")) {
+    if (window.confirm("Bạn có chắc chắn muốn xóa bài học này? Dữ liệu sẽ biến mất vĩnh viễn.")) {
       const filtered = sentences.filter(s => s.id !== id);
-      save(filtered);
+      saveAndNotify(filtered);
     }
   };
 
@@ -118,7 +124,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
         {currentList.length === 0 ? (
           <div className="py-20 text-center">
              <div className="text-4xl mb-4">📖</div>
-             <p className="text-slate-400 font-black text-[10px] uppercase tracking-widest">Không có bài học nào</p>
+             <p className="text-slate-400 font-black text-[10px] uppercase tracking-widest">Trống</p>
           </div>
         ) : currentList.map((s, idx) => (
           <div key={s.id} className="relative group animate-in fade-in slide-in-from-bottom-2">

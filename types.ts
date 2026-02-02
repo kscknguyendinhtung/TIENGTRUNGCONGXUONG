@@ -30,6 +30,7 @@ export interface MindmapCategory {
     text: string;
     pinyin: string;
     meaning: string;
+    hanViet: string;
   }[];
 }
 

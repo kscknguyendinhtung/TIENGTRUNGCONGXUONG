@@ -64,12 +64,24 @@ export const analyzeImageAndExtractText = async (base64Images: string[]): Promis
   }
 };
 
-export const generateMindmap = async (words: {text: string, pinyin: string, meaning: string}[]): Promise<MindmapCategory[]> => {
-  const wordsJson = JSON.stringify(words);
+export const generateMindmap = async (words: {text: string, pinyin: string, meaning: string, hanViet: string}[]): Promise<MindmapCategory[]> => {
+  const wordList = words.map(w => w.text).join(', ');
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
-    contents: `Hãy phân loại danh sách từ vựng tiếng Trung sau đây vào các nhóm ngữ pháp chuẩn: Danh từ, Động từ, Tính từ, Nghi vấn từ, Trợ từ, Hư từ, Liên từ, Đại từ, Từ chỉ thời gian, Khác. 
-    Dữ liệu: ${wordsJson}`,
+    contents: `NHIỆM VỤ: Phân loại danh sách từ vựng tiếng Trung sau đây vào các nhóm cây thư mục logic.
+    DANH SÁCH TỪ VỰNG: ${wordList}
+    
+    CÁC NHÓM ƯU TIÊN PHÂN LOẠI:
+    1. Ngữ pháp: Danh từ, Động từ, Tính từ, Trạng từ, Liên từ, Trợ từ, Lượng từ.
+    2. Không gian/Thời gian: Phương hướng, Vị trí, Thời gian, Thứ tự.
+    3. Chuyên ngành Công nghiệp: 
+       - Sản xuất (SMT, Cơ khí, Máy móc, Bảo trì, Thiết bị).
+       - Quản lý (Nhân sự, Kho bãi, Văn phòng, Chất lượng/QC).
+    
+    YÊU CẦU: 
+    1. Trả về mảng các category. 
+    2. Trong mỗi category, danh sách từ chỉ cần chứa trường "text" khớp với từ vựng đầu vào.
+    3. Phân loại thật chính xác theo ngữ nghĩa chuyên môn.`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -77,15 +89,13 @@ export const generateMindmap = async (words: {text: string, pinyin: string, mean
         items: {
           type: Type.OBJECT,
           properties: {
-            name: { type: Type.STRING, description: "Tên nhóm (ví dụ: Danh từ)" },
+            name: { type: Type.STRING, description: "Tên nhóm phân loại (ví dụ: Động từ, SMT, QC...)" },
             words: {
               type: Type.ARRAY,
               items: {
                 type: Type.OBJECT,
                 properties: {
-                  text: { type: Type.STRING },
-                  pinyin: { type: Type.STRING },
-                  meaning: { type: Type.STRING }
+                  text: { type: Type.STRING, description: "Hán tự gốc" }
                 }
               }
             }
