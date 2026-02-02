@@ -30,6 +30,7 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ words, user, onClose }
   const [loadingStep, setLoadingStep] = useState(0);
   const [progress, setProgress] = useState(0);
   const [masteryMap, setMasteryMap] = useState<Record<string, boolean>>({});
+  const [filter, setFilter] = useState<'all' | 'mastered' | 'unmastered'>('all');
 
   // Create a local lookup map for "re-hydration"
   const localWordLookup = useMemo(() => {
@@ -109,6 +110,18 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ words, user, onClose }
     }
   };
 
+  const filteredMindmap = useMemo(() => {
+    return mindmap.map(cat => ({
+      ...cat,
+      words: cat.words.filter(w => {
+        const isMastered = !!masteryMap[w.text];
+        if (filter === 'mastered') return isMastered;
+        if (filter === 'unmastered') return !isMastered;
+        return true;
+      })
+    })).filter(cat => cat.words.length > 0);
+  }, [mindmap, masteryMap, filter]);
+
   return (
     <div className="fixed inset-0 bg-white z-[200] flex flex-col animate-in fade-in duration-300 overflow-hidden">
       {/* Header */}
@@ -136,6 +149,28 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ words, user, onClose }
         </div>
       </div>
 
+      {/* Filter Bar */}
+      <div className="bg-slate-50 px-6 py-3 border-b border-slate-100 flex gap-2">
+        <button 
+          onClick={() => setFilter('all')}
+          className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all ${filter === 'all' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-400 border border-slate-100'}`}
+        >
+          TẤT CẢ
+        </button>
+        <button 
+          onClick={() => setFilter('mastered')}
+          className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all ${filter === 'mastered' ? 'bg-emerald-600 text-white shadow-md' : 'bg-white text-slate-400 border border-slate-100'}`}
+        >
+          ĐÃ THUỘC
+        </button>
+        <button 
+          onClick={() => setFilter('unmastered')}
+          className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all ${filter === 'unmastered' ? 'bg-rose-600 text-white shadow-md' : 'bg-white text-slate-400 border border-slate-100'}`}
+        >
+          CHƯA THUỘC
+        </button>
+      </div>
+
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto bg-slate-50 p-5 relative">
         {loading && (
@@ -152,17 +187,24 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ words, user, onClose }
           </div>
         )}
 
-        {mindmap.length === 0 && !loading ? (
+        {filteredMindmap.length === 0 && !loading ? (
           <div className="h-full flex flex-col items-center justify-center text-center py-20">
             <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-slate-100">
                <svg className="w-10 h-10 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
             </div>
-            <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest mb-8 text-center max-w-[200px]">Nhấn nút để AI tự động sắp xếp từ vựng vào các thư mục Ngữ pháp & Công xưởng</p>
-            <button onClick={handleGenerate} className="bg-slate-900 text-white px-10 py-5 rounded-[24px] font-black text-[11px] tracking-widest uppercase shadow-xl active:scale-95">Bắt đầu phân loại AI</button>
+            <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest mb-8 text-center max-w-[200px]">
+              {mindmap.length === 0 ? "Nhấn nút để AI tự động sắp xếp từ vựng vào các thư mục Ngữ pháp & Công xưởng" : "Không tìm thấy từ vựng nào phù hợp với bộ lọc này"}
+            </p>
+            {mindmap.length === 0 && (
+              <button onClick={handleGenerate} className="bg-slate-900 text-white px-10 py-5 rounded-[24px] font-black text-[11px] tracking-widest uppercase shadow-xl active:scale-95">Bắt đầu phân loại AI</button>
+            )}
+            {mindmap.length > 0 && (
+              <button onClick={() => setFilter('all')} className="bg-slate-900 text-white px-10 py-4 rounded-[20px] font-black text-[10px] tracking-widest uppercase shadow-xl active:scale-95">Xem tất cả</button>
+            )}
           </div>
         ) : (
           <div className="space-y-4 pb-12">
-            {mindmap.map((cat, idx) => (
+            {filteredMindmap.map((cat, idx) => (
               <div key={idx} className="bg-white border border-slate-100 rounded-[32px] overflow-hidden shadow-sm">
                 <button 
                   onClick={() => toggleNode(cat.name)}
@@ -243,7 +285,7 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ words, user, onClose }
                <span className="text-[8px] font-black uppercase text-slate-400 tracking-widest">Đang học</span>
             </div>
          </div>
-         <span className="text-[9px] font-black text-slate-400 bg-slate-100 px-3 py-1 rounded-full uppercase tracking-widest">{words.length} TỪ VỰNG</span>
+         <span className="text-[9px] font-black text-slate-400 bg-slate-100 px-3 py-1 rounded-full uppercase tracking-widest">{filteredMindmap.reduce((acc, cat) => acc + cat.words.length, 0)} TỪ VỰNG</span>
       </div>
     </div>
   );
