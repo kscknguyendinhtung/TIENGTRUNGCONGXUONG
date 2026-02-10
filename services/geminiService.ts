@@ -4,6 +4,17 @@ import { SentenceAnalysis, MindmapCategory } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
 
+// Helper to clean JSON string from Markdown code blocks
+const cleanJsonString = (text: string): string => {
+  if (!text) return "[]";
+  let clean = text.trim();
+  // Remove ```json and ``` wrap
+  if (clean.startsWith("```")) {
+    clean = clean.replace(/^```(json)?\s*/i, "").replace(/\s*```$/, "");
+  }
+  return clean;
+};
+
 // Helper to extract words from either text or image
 export const extractVocabulary = async (input: { text?: string, imageBase64?: string }): Promise<any[]> => {
   const parts: any[] = [];
@@ -12,20 +23,28 @@ export const extractVocabulary = async (input: { text?: string, imageBase64?: st
     parts.push({ inlineData: { data: input.imageBase64, mimeType: 'image/jpeg' } });
     parts.push({ text: "OCR hình ảnh này và trích xuất toàn bộ từ vựng tiếng Trung quan trọng." });
   } else if (input.text) {
-    parts.push({ text: `Phân tích danh sách từ vựng/đoạn văn này: ${input.text}` });
+    parts.push({ text: `Phân tích danh sách từ vựng này: \n${input.text}` });
   }
 
   parts.push({
     text: `
-    NHIỆM VỤ: Trích xuất danh sách từ vựng.
-    YÊU CẦU ĐẦU RA CHO MỖI TỪ:
-    1. text: Chữ Hán.
-    2. pinyin: Pinyin có dấu.
-    3. hanViet: Âm Hán Việt.
-    4. meaning: Nghĩa tiếng Việt ngắn gọn.
-    5. category: Phân loại từ này vào 1 trong các nhóm sau: 
-       - "Danh từ", "Động từ", "Tính từ", "Mẫu câu", 
-       - "Sản xuất" (SMT, Máy móc), "Chất lượng" (QC/QA), "Nhân sự", "Văn phòng", "Thời gian/Địa điểm", "Khác".
+    NHIỆM VỤ: Chuyển đổi dữ liệu đầu vào thành danh sách từ vựng JSON chuẩn.
+    
+    QUY TẮC XỬ LÝ QUAN TRỌNG ĐỂ TRÁNH LỆCH DÒNG:
+    1. Xử lý từng dòng (hoặc từng câu) độc lập. KHÔNG lấy nghĩa của dòng dưới đắp lên dòng trên.
+    2. Chấp nhận đa định dạng đầu vào trên cùng một danh sách:
+       - Dạng 1: [Tiếng Trung] [Pinyin] [Tiếng Việt]
+       - Dạng 2: [Tiếng Việt] [Tiếng Trung]
+       - Dạng 3: [Tiếng Trung] (thiếu nghĩa) -> Hãy tự điền nghĩa.
+    3. Nếu một dòng bị lỗi hoặc thiếu thông tin, hãy dùng kiến thức của bạn để điền thông tin còn thiếu cho chính dòng đó.
+    
+    YÊU CẦU ĐẦU RA CHO MỖI TỪ (JSON Object):
+    - text: Chữ Hán (Giản thể).
+    - pinyin: Pinyin chuẩn có dấu thanh.
+    - hanViet: Âm Hán Việt.
+    - meaning: Nghĩa tiếng Việt ngắn gọn, súc tích.
+    - category: Tự động phân loại chính xác vào 1 trong các nhóm: 
+       "Danh từ", "Động từ", "Tính từ", "Mẫu câu", "Sản xuất" (SMT, Máy móc), "Chất lượng" (QC/QA), "Nhân sự", "Văn phòng", "Khác".
     `
   });
 
@@ -51,7 +70,9 @@ export const extractVocabulary = async (input: { text?: string, imageBase64?: st
   });
 
   try {
-    return JSON.parse(response.text || "[]");
+    const jsonStr = cleanJsonString(response.text || "[]");
+    const result = JSON.parse(jsonStr);
+    return Array.isArray(result) ? result : [];
   } catch (e) {
     console.error("Lỗi parse từ vựng:", e);
     return [];
@@ -111,8 +132,8 @@ export const analyzeImageAndExtractText = async (base64Images: string[]): Promis
   });
 
   try {
-    const text = response.text || "[]";
-    return JSON.parse(text);
+    const jsonStr = cleanJsonString(response.text || "[]");
+    return JSON.parse(jsonStr);
   } catch (e) {
     console.error("Lỗi parse JSON Gemini:", e);
     return [];
@@ -162,7 +183,8 @@ export const generateMindmap = async (words: {text: string, pinyin: string, mean
   });
 
   try {
-    return JSON.parse(response.text || "[]");
+    const jsonStr = cleanJsonString(response.text || "[]");
+    return JSON.parse(jsonStr);
   } catch (e) {
     console.error("Lỗi parse Mindmap:", e);
     return [];

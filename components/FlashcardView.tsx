@@ -7,9 +7,11 @@ import { MindmapView } from './MindmapView';
 interface FlashcardViewProps { 
   currentUser: string; 
   onDataChange?: () => void;
+  sheetUrl?: string;
+  onPull?: () => void;
 }
 
-export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDataChange }) => {
+export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDataChange, sheetUrl, onPull }) => {
   const [cards, setCards] = useState<Flashcard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
@@ -33,9 +35,13 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
 
   const [showMindmap, setShowMindmap] = useState(false);
 
+  // Bulk select states
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedWords, setSelectedWords] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     loadCards();
-  }, [currentUser]);
+  }, [currentUser, onPull]); // Reload if onPull triggers upstream changes
 
   const loadCards = () => {
     // Load Mindmap categories mapping first
@@ -63,40 +69,45 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     const wordSet = new Set<string>();
 
     if (localSentences) {
-      const sentences: SentenceAnalysis[] = JSON.parse(localSentences);
-      sentences.forEach(s => {
-        s.words?.forEach(w => {
-          if (!wordSet.has(w.text)) {
-            wordSet.add(w.text);
-            // Use Mindmap category if available, otherwise fallback to word's own category or 'Khác'
-            const finalCategory = wordCategoryMap[w.text] || w.category || 'Khác';
-            extractedCards.push({
-              id: `w-${w.text}`,
-              word: w.text,
-              pinyin: w.pinyin,
-              meaning: w.meaning,
-              hanViet: w.hanViet || '',
-              category: finalCategory,
-              mastered: localMastery[w.text] || false
-            });
-          }
+      try {
+        const sentences: SentenceAnalysis[] = JSON.parse(localSentences);
+        sentences.forEach(s => {
+          s.words?.forEach(w => {
+            if (!wordSet.has(w.text)) {
+              wordSet.add(w.text);
+              const finalCategory = wordCategoryMap[w.text] || w.category || 'Khác';
+              extractedCards.push({
+                id: `w-${w.text}`,
+                word: w.text,
+                pinyin: w.pinyin,
+                meaning: w.meaning,
+                hanViet: w.hanViet || '',
+                category: finalCategory,
+                mastered: localMastery[w.text] || false
+              });
+            }
+          });
         });
-      });
+      } catch(e) { console.error("Error loading sentences:", e); }
     }
 
     if (localManual) {
-      const manual: Flashcard[] = JSON.parse(localManual);
-      manual.forEach(w => {
-        if (!wordSet.has(w.word)) {
-          wordSet.add(w.word);
-          const finalCategory = wordCategoryMap[w.word] || w.category || 'Khác';
-          extractedCards.push({ 
-            ...w, 
-            category: finalCategory,
-            mastered: localMastery[w.word] || false 
+      try {
+        const manual: Flashcard[] = JSON.parse(localManual);
+        if (Array.isArray(manual)) {
+          manual.forEach(w => {
+            if (!wordSet.has(w.word)) {
+              wordSet.add(w.word);
+              const finalCategory = wordCategoryMap[w.word] || w.category || 'Khác';
+              extractedCards.push({ 
+                ...w, 
+                category: finalCategory,
+                mastered: localMastery[w.word] || false 
+              });
+            }
           });
         }
-      });
+      } catch(e) { console.error("Error loading manual cards:", e); }
     }
 
     setCards(extractedCards);
@@ -153,12 +164,58 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [isAutoPlay, autoInterval, displayCards.length, viewMode]);
 
+  // Handle toggling selection mode
+  const toggleSelectionMode = () => {
+    setIsSelectionMode(!isSelectionMode);
+    setSelectedWords(new Set()); // Reset selection when toggling
+    setViewMode('list'); // Force list view
+  };
+
+  const handleSelectWord = (word: string) => {
+    setSelectedWords(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(word)) newSet.delete(word);
+      else newSet.add(word);
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedWords.size === displayCards.length) {
+      setSelectedWords(new Set());
+    } else {
+      setSelectedWords(new Set(displayCards.map(c => c.word)));
+    }
+  };
+
+  const deleteSelectedWords = () => {
+    if (selectedWords.size === 0) return;
+    if (!confirm(`Bạn có chắc chắn muốn xóa ${selectedWords.size} từ đã chọn?`)) return;
+
+    try {
+      const raw = localStorage.getItem(`manual_words_${currentUser}`);
+      const manual: Flashcard[] = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(manual)) {
+        const updatedManual = manual.filter((w: Flashcard) => !selectedWords.has(w.word));
+        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
+      }
+    } catch(e) { console.error("Error bulk deleting words", e); }
+
+    const masteryMap = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
+    selectedWords.forEach(word => delete masteryMap[word]);
+    localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(masteryMap));
+
+    setSelectedWords(new Set());
+    setIsSelectionMode(false);
+    loadCards();
+    if (onDataChange) onDataChange();
+  };
+
   const toggleMastery = (card: Flashcard) => {
     const masteryMap = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
     masteryMap[card.word] = !card.mastered;
     localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(masteryMap));
     
-    // Update local state without reload to be smoother
     setCards(prev => prev.map(c => c.word === card.word ? { ...c, mastered: !c.mastered } : c));
     if (onDataChange) onDataChange();
   };
@@ -166,11 +223,15 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
   const deleteWord = (word: string) => {
     if (!confirm(`Xóa từ "${word}" khỏi danh sách học?`)) return;
     
-    const manual = JSON.parse(localStorage.getItem(`manual_words_${currentUser}`) || '[]');
-    const updatedManual = manual.filter((w: Flashcard) => w.word !== word);
-    localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
+    try {
+      const raw = localStorage.getItem(`manual_words_${currentUser}`);
+      const manual: Flashcard[] = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(manual)) {
+        const updatedManual = manual.filter((w: Flashcard) => w.word !== word);
+        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
+      }
+    } catch(e) { console.error("Error deleting word", e); }
 
-    // Also remove from mastery map to keep it clean
     const masteryMap = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
     delete masteryMap[word];
     localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(masteryMap));
@@ -200,7 +261,16 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
       }
 
       if (newWordsRaw.length > 0) {
-        const manual = JSON.parse(localStorage.getItem(`manual_words_${currentUser}`) || '[]');
+        let manual: Flashcard[] = [];
+        try {
+           const raw = localStorage.getItem(`manual_words_${currentUser}`);
+           manual = raw ? JSON.parse(raw) : [];
+           if (!Array.isArray(manual)) manual = [];
+        } catch (e) {
+           console.error("Manual words corrupt, resetting.", e);
+           manual = [];
+        }
+
         const formattedWords: Flashcard[] = newWordsRaw.map((w, idx) => ({
           id: `manual-${Date.now()}-${idx}`,
           word: w.text,
@@ -212,7 +282,9 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
           mastered: false
         }));
         
-        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify([...manual, ...formattedWords]));
+        const updatedList = [...manual, ...formattedWords];
+        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedList));
+        
         setInputText('');
         setShowAddModal(false);
         loadCards();
@@ -221,10 +293,49 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         alert("Không tìm thấy từ vựng nào!");
       }
     } catch (e) {
+      console.error(e);
       alert("Lỗi xử lý AI. Vui lòng thử lại.");
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleCardSelect = (index: number) => {
+    if (isSelectionMode) {
+      handleSelectWord(displayCards[index].word);
+    } else {
+      setCurrentIndex(index);
+      setViewMode('card');
+      setIsFlipped(false);
+      setIsAutoPlay(false); 
+    }
+  };
+
+  const openGoogleSheet = () => {
+    if (sheetUrl) window.open(sheetUrl, '_blank');
+    else alert("Vui lòng cấu hình URL Google Sheets trong phần Cài đặt (nút Home).");
+  };
+
+  // Logic copy dữ liệu để dán vào Sheet
+  const handleCopyForSheet = () => {
+    if (displayCards.length === 0) return alert("Danh sách trống!");
+    
+    // Tạo header cho Sheet
+    const headers = "Hán tự\tPinyin\tHán Việt\tNghĩa\tPhân loại\tTrạng thái (TRUE=Thuộc)";
+    
+    // Tạo các dòng dữ liệu, ngăn cách bằng Tab (\t) để Excel/Sheet hiểu cột
+    const rows = displayCards.map(c => {
+      const cleanMeaning = c.meaning.replace(/(\r\n|\n|\r)/gm, " "); // Xóa xuống dòng trong nghĩa
+      return `${c.word}\t${c.pinyin}\t${c.hanViet}\t${cleanMeaning}\t${c.category || ''}\t${c.mastered ? 'TRUE' : 'FALSE'}`;
+    }).join('\n');
+
+    const fullText = `${headers}\n${rows}`;
+    
+    navigator.clipboard.writeText(fullText).then(() => {
+        alert("Đã COPY toàn bộ dữ liệu!\n\nBây giờ hãy mở Google Sheet mới và nhấn Ctrl+V (hoặc Command+V) để dán vào.");
+    }).catch(() => {
+        alert("Lỗi khi copy. Vui lòng thử lại.");
+    });
   };
 
   if (cards.length === 0 && !showAddModal) return (
@@ -249,8 +360,8 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4"/></svg>
             </button>
             <div className="bg-slate-100 p-1 rounded-xl flex">
-              <button onClick={() => setViewMode('card')} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'card' ? 'bg-white shadow-sm text-rose-600' : 'text-slate-400'}`}>THẺ</button>
-              <button onClick={() => setViewMode('list')} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-rose-600' : 'text-slate-400'}`}>LIST</button>
+              <button onClick={() => { setViewMode('card'); setIsSelectionMode(false); }} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'card' ? 'bg-white shadow-sm text-rose-600' : 'text-slate-400'}`}>THẺ</button>
+              <button onClick={() => setViewMode('list')} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-rose-600' : 'text-slate-400'}`}>BẢNG</button>
             </div>
           </div>
         </div>
@@ -271,32 +382,36 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
            </div>
         </div>
         
-        <div className="grid grid-cols-2 gap-2">
-          <button onClick={() => setFrontMode(frontMode === 'chinese' ? 'vietnamese' : 'chinese')} className={`py-3 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all border ${frontMode === 'chinese' ? 'bg-blue-50 border-blue-100 text-blue-600' : 'bg-rose-50 border-rose-100 text-rose-600'}`}>Mặt trước: {frontMode === 'chinese' ? 'HÁN TỰ' : 'NGHĨA'}</button>
-          <button onClick={() => setIsRandom(!isRandom)} className={`py-3 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all border ${isRandom ? 'bg-amber-50 border-amber-200 text-amber-600 shadow-sm' : 'bg-white border-slate-100 text-slate-400'}`}>{isRandom ? 'XÁO: BẬT' : 'XÁO: TẮT'}</button>
-        </div>
+        {viewMode === 'card' && (
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => setFrontMode(frontMode === 'chinese' ? 'vietnamese' : 'chinese')} className={`py-3 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all border ${frontMode === 'chinese' ? 'bg-blue-50 border-blue-100 text-blue-600' : 'bg-rose-50 border-rose-100 text-rose-600'}`}>Mặt trước: {frontMode === 'chinese' ? 'HÁN TỰ' : 'NGHĨA'}</button>
+            <button onClick={() => setIsRandom(!isRandom)} className={`py-3 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all border ${isRandom ? 'bg-amber-50 border-amber-200 text-amber-600 shadow-sm' : 'bg-white border-slate-100 text-slate-400'}`}>{isRandom ? 'XÁO: BẬT' : 'XÁO: TẮT'}</button>
+          </div>
+        )}
 
-        <div className="bg-slate-900 p-5 rounded-[28px] text-white flex flex-col gap-3 shadow-lg">
-           <div className="flex justify-between items-center mb-1">
-              <div className="flex items-center gap-2">
-                 <div className={`w-1.5 h-1.5 rounded-full ${isAutoPlay ? 'bg-green-400 animate-pulse' : 'bg-slate-600'}`}></div>
-                 <span className="text-[8px] font-black uppercase tracking-[0.2em]">TỰ ĐỘNG CHẠY</span>
-              </div>
-              <button onClick={() => setIsAutoPlay(!isAutoPlay)} className={`px-4 py-1.5 rounded-full text-[8px] font-black transition-all ${isAutoPlay ? 'bg-rose-500 text-white' : 'bg-white text-slate-900'}`}>{isAutoPlay ? 'DỪNG' : 'BẮT ĐẦU'}</button>
-           </div>
-           
-           <div className="flex items-center gap-3">
-              <span className="text-[8px] font-bold text-slate-400 uppercase w-16">Tốc độ:</span>
-              <input type="range" min="0.5" max="2.0" step="0.1" value={playbackSpeed} onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))} className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-rose-500"/>
-              <span className="text-[9px] font-black w-6 text-right">{playbackSpeed}x</span>
-           </div>
+        {viewMode === 'card' && (
+          <div className="bg-slate-900 p-5 rounded-[28px] text-white flex flex-col gap-3 shadow-lg">
+             <div className="flex justify-between items-center mb-1">
+                <div className="flex items-center gap-2">
+                   <div className={`w-1.5 h-1.5 rounded-full ${isAutoPlay ? 'bg-green-400 animate-pulse' : 'bg-slate-600'}`}></div>
+                   <span className="text-[8px] font-black uppercase tracking-[0.2em]">TỰ ĐỘNG CHẠY</span>
+                </div>
+                <button onClick={() => setIsAutoPlay(!isAutoPlay)} className={`px-4 py-1.5 rounded-full text-[8px] font-black transition-all ${isAutoPlay ? 'bg-rose-500 text-white' : 'bg-white text-slate-900'}`}>{isAutoPlay ? 'DỪNG' : 'BẮT ĐẦU'}</button>
+             </div>
+             
+             <div className="flex items-center gap-3">
+                <span className="text-[8px] font-bold text-slate-400 uppercase w-16">Tốc độ:</span>
+                <input type="range" min="0.5" max="2.0" step="0.1" value={playbackSpeed} onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))} className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-rose-500"/>
+                <span className="text-[9px] font-black w-6 text-right">{playbackSpeed}x</span>
+             </div>
 
-           <div className="flex items-center gap-3">
-              <span className="text-[8px] font-bold text-slate-400 uppercase w-16">Chờ:</span>
-              <input type="range" min="2" max="10" step="1" value={autoInterval} onChange={(e) => setAutoInterval(parseInt(e.target.value))} className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"/>
-              <span className="text-[9px] font-black w-6 text-right">{autoInterval}s</span>
-           </div>
-        </div>
+             <div className="flex items-center gap-3">
+                <span className="text-[8px] font-bold text-slate-400 uppercase w-16">Chờ:</span>
+                <input type="range" min="2" max="10" step="1" value={autoInterval} onChange={(e) => setAutoInterval(parseInt(e.target.value))} className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"/>
+                <span className="text-[9px] font-black w-6 text-right">{autoInterval}s</span>
+             </div>
+          </div>
+        )}
       </div>
 
       {displayCards.length === 0 ? (
@@ -366,29 +481,91 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         </div>
       ) : viewMode === 'list' ? (
         <div className="space-y-3 pb-20">
-          {displayCards.map((card, idx) => (
-            <div key={idx} className="bg-white p-5 rounded-[28px] border border-slate-100 flex items-center justify-between group active:scale-[0.98] transition-transform">
-              <div className="flex items-center gap-4">
-                <span className="text-3xl font-black chinese-font text-slate-900">{card.word}</span>
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-black text-rose-600 uppercase tracking-tighter">{card.pinyin}</span>
-                    <span className="text-[7px] font-black bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full uppercase">{card.hanViet}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                     <span className="text-[7px] font-black text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded uppercase max-w-[80px] truncate">{card.category || 'Khác'}</span>
-                     <p className="text-[11px] font-bold text-slate-500 leading-tight">{card.meaning}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="flex gap-1.5">
-                <button onClick={() => deleteWord(card.word)} className="w-10 h-10 rounded-xl flex items-center justify-center bg-rose-50 text-rose-400 transition-all opacity-0 group-hover:opacity-100 active:opacity-100">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          <div className="flex flex-col gap-3">
+             <div className="flex gap-2">
+               <button onClick={handleCopyForSheet} className="flex-1 bg-amber-50 text-amber-700 border border-amber-200 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-sm">
+                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+                 Copy dữ liệu (vào Sheet)
+               </button>
+               {onPull && (
+                 <button onClick={onPull} className="flex-1 bg-blue-50 text-blue-700 border border-blue-200 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2">
+                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                   Cập nhật từ Sheet
+                 </button>
+               )}
+               <button onClick={openGoogleSheet} className="w-12 bg-green-50 text-green-700 border border-green-200 rounded-xl flex items-center justify-center active:scale-90 transition-all">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+               </button>
+             </div>
+
+             <div className="flex justify-between items-center px-1">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest opacity-60">
+                   {isSelectionMode ? `Đã chọn: ${selectedWords.size}` : 'Chạm vào từ để học'}
+                </p>
+                <button onClick={toggleSelectionMode} className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-lg ${isSelectionMode ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-500'}`}>
+                   {isSelectionMode ? 'Hủy chọn' : 'Chọn nhiều'}
                 </button>
-                <button onClick={() => toggleMastery(card)} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${card.mastered ? 'bg-green-500 text-white' : 'bg-slate-50 text-slate-300'}`}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg></button>
-              </div>
+             </div>
+          </div>
+          
+          {isSelectionMode && (
+             <div className="flex gap-2">
+                <button onClick={handleSelectAll} className="flex-1 py-2 bg-slate-100 text-slate-500 rounded-xl text-[9px] font-black uppercase tracking-widest">Chọn Tất Cả</button>
+                {selectedWords.size > 0 && (
+                   <button onClick={deleteSelectedWords} className="flex-1 py-2 bg-rose-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-md">Xóa {selectedWords.size} Từ</button>
+                )}
+             </div>
+          )}
+
+          {/* Table Header */}
+          <div className="grid grid-cols-12 gap-1 px-4 py-3 bg-slate-100 rounded-t-xl text-[8px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200">
+             <div className="col-span-2">Hán tự</div>
+             <div className="col-span-2">Pinyin</div>
+             <div className="col-span-2">Hán Việt</div>
+             <div className="col-span-4">Nghĩa</div>
+             <div className="col-span-2 text-right">Trạng thái</div>
+          </div>
+
+          <div className="space-y-1">
+          {displayCards.map((card, idx) => (
+            <div 
+              key={idx} 
+              onClick={() => handleCardSelect(idx)}
+              className={`cursor-pointer bg-white px-4 py-3 rounded-lg border grid grid-cols-12 gap-1 items-center active:scale-[0.99] transition-all hover:shadow-sm ${isSelectionMode && selectedWords.has(card.word) ? 'border-rose-500 bg-rose-50' : 'border-slate-100'}`}
+            >
+               <div className="col-span-2 flex items-center gap-2">
+                 {isSelectionMode && (
+                   <div className={`w-3 h-3 rounded border flex items-center justify-center ${selectedWords.has(card.word) ? 'bg-rose-500 border-rose-500' : 'border-slate-300'}`}>
+                      {selectedWords.has(card.word) && <svg className="w-2 h-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7"/></svg>}
+                   </div>
+                 )}
+                 <span className="text-sm font-black chinese-font text-slate-900 truncate">{card.word}</span>
+               </div>
+               <div className="col-span-2">
+                 <span className="text-[9px] font-bold text-rose-500 truncate block">{card.pinyin}</span>
+               </div>
+               <div className="col-span-2">
+                 <span className="text-[9px] font-bold text-blue-500 truncate block">{card.hanViet}</span>
+               </div>
+               <div className="col-span-4">
+                 <span className="text-[9px] font-bold text-slate-600 line-clamp-2 leading-tight">{card.meaning}</span>
+               </div>
+               <div className="col-span-2 flex justify-end items-center gap-2">
+                 <button 
+                   onClick={(e) => { e.stopPropagation(); toggleMastery(card); }} 
+                   className={`w-6 h-6 rounded-md flex items-center justify-center transition-all ${card.mastered ? 'bg-green-500 text-white shadow-sm' : 'bg-slate-100 text-slate-300'}`}
+                 >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"/></svg>
+                 </button>
+                 {!isSelectionMode && (
+                   <button onClick={(e) => { e.stopPropagation(); deleteWord(card.word); }} className="text-slate-300 hover:text-rose-500 p-1">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                   </button>
+                 )}
+               </div>
             </div>
           ))}
+          </div>
         </div>
       ) : null}
 
@@ -409,7 +586,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
                    <textarea 
                      value={inputText}
                      onChange={(e) => setInputText(e.target.value)}
-                     placeholder="Nhập danh sách từ, câu hoặc đoạn văn bản tiếng Trung..."
+                     placeholder="Dán danh sách từ (Trung-Việt, Việt-Trung đều được)..."
                      className="w-full h-32 px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-sm text-slate-700 resize-none focus:border-blue-500 transition-colors"
                    />
                 </div>

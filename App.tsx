@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { AppTab, USERS, SentenceAnalysis } from './types';
 import { FlashcardView } from './components/FlashcardView';
@@ -11,9 +12,13 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>(AppTab.USER_SELECT);
   const [currentUser, setCurrentUser] = useState<string | null>(localStorage.getItem('current_user'));
   const [showSyncModal, setShowSyncModal] = useState(false);
-  const [scriptUrl, setScriptUrl] = useState(localStorage.getItem('global_script_url') || DEFAULT_SCRIPT_URL);
-  const [syncing, setSyncing] = useState(false);
   
+  // Script URL for API logic
+  const [scriptUrl, setScriptUrl] = useState(localStorage.getItem('global_script_url') || DEFAULT_SCRIPT_URL);
+  // Sheet URL for direct user editing
+  const [sheetUrl, setSheetUrl] = useState(localStorage.getItem('global_sheet_url') || "");
+  
+  const [syncing, setSyncing] = useState(false);
   const [stats, setStats] = useState({ vocabCount: 0, masteredCount: 0, lessonsCount: 0 });
 
   const loadStats = useCallback((user: string) => {
@@ -58,6 +63,30 @@ const App: React.FC = () => {
     setSyncing(false);
     loadStats(user);
   }, [scriptUrl, loadStats]);
+
+  const triggerCloudRestore = useCallback(async () => {
+    if (!scriptUrl || !currentUser) return;
+    setSyncing(true);
+    try {
+      const cloudData = await fetchFromGoogleSheets(scriptUrl, currentUser);
+      if (cloudData) {
+        if (cloudData.reading) localStorage.setItem(`reading_${currentUser}`, JSON.stringify(cloudData.reading));
+        if (cloudData.mastery) localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(cloudData.mastery));
+        if (cloudData.manual_words) localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(cloudData.manual_words));
+        loadStats(currentUser);
+        // Force a UI refresh by briefly toggling tabs or using a key (simplified here by relying on child components to re-read localStorage on prop change or mount)
+        // We will pass a timestamp prop to children to force re-render
+        alert("Đã cập nhật dữ liệu mới nhất từ Google Sheets!");
+      } else {
+        alert("Không tải được dữ liệu. Kiểm tra lại đường truyền hoặc Script URL.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Lỗi khi tải dữ liệu.");
+    } finally {
+      setSyncing(false);
+    }
+  }, [scriptUrl, currentUser, loadStats]);
 
   const selectUser = async (user: string) => {
     setCurrentUser(user);
@@ -115,8 +144,16 @@ const App: React.FC = () => {
   }
 
   const renderContent = () => {
+    // We pass key={stats.vocabCount} (or similar) to force re-render when data changes significantly, 
+    // or rely on the views to handle updates via onDataChange.
     switch (activeTab) {
-      case AppTab.VOCABULARY: return <FlashcardView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} />;
+      case AppTab.VOCABULARY: 
+        return <FlashcardView 
+          currentUser={currentUser!} 
+          onDataChange={() => triggerCloudBackup(currentUser!)}
+          sheetUrl={sheetUrl}
+          onPull={triggerCloudRestore}
+        />;
       case AppTab.READING: return <ReadingView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} />;
       case AppTab.GRAMMAR: return <GrammarView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} />;
       default:
@@ -221,7 +258,7 @@ const App: React.FC = () => {
             <p className="text-slate-400 text-[10px] font-bold mb-8 uppercase tracking-wider">Cấu hình URL để đồng bộ dữ liệu.</p>
             <div className="space-y-6">
               <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Apps Script URL</label>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Apps Script URL (Backend API)</label>
                 <input 
                   type="text" 
                   value={scriptUrl} 
@@ -230,6 +267,19 @@ const App: React.FC = () => {
                     localStorage.setItem('global_script_url', e.target.value);
                   }}
                   placeholder="https://script.google.com/..."
+                  className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs focus:border-blue-500 shadow-inner"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Google Sheets URL (Để sửa trực tiếp)</label>
+                <input 
+                  type="text" 
+                  value={sheetUrl} 
+                  onChange={(e) => {
+                    setSheetUrl(e.target.value);
+                    localStorage.setItem('global_sheet_url', e.target.value);
+                  }}
+                  placeholder="https://docs.google.com/spreadsheets/d/..."
                   className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs focus:border-blue-500 shadow-inner"
                 />
               </div>
