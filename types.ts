@@ -5,6 +5,7 @@ export interface Flashcard {
   pinyin: string;
   meaning: string;
   hanViet: string;
+  category?: string; // New field for sorting
   mastered?: boolean;
   isManual?: boolean;
 }
@@ -20,6 +21,7 @@ export interface SentenceAnalysis {
     pinyin: string;
     meaning: string;
     hanViet: string;
+    category?: string; // New field
   }[];
   mastered?: boolean;
 }
@@ -31,6 +33,7 @@ export interface MindmapCategory {
     pinyin: string;
     meaning: string;
     hanViet: string;
+    category?: string;
   }[];
 }
 

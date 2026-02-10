@@ -4,6 +4,60 @@ import { SentenceAnalysis, MindmapCategory } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
 
+// Helper to extract words from either text or image
+export const extractVocabulary = async (input: { text?: string, imageBase64?: string }): Promise<any[]> => {
+  const parts: any[] = [];
+  
+  if (input.imageBase64) {
+    parts.push({ inlineData: { data: input.imageBase64, mimeType: 'image/jpeg' } });
+    parts.push({ text: "OCR hình ảnh này và trích xuất toàn bộ từ vựng tiếng Trung quan trọng." });
+  } else if (input.text) {
+    parts.push({ text: `Phân tích danh sách từ vựng/đoạn văn này: ${input.text}` });
+  }
+
+  parts.push({
+    text: `
+    NHIỆM VỤ: Trích xuất danh sách từ vựng.
+    YÊU CẦU ĐẦU RA CHO MỖI TỪ:
+    1. text: Chữ Hán.
+    2. pinyin: Pinyin có dấu.
+    3. hanViet: Âm Hán Việt.
+    4. meaning: Nghĩa tiếng Việt ngắn gọn.
+    5. category: Phân loại từ này vào 1 trong các nhóm sau: 
+       - "Danh từ", "Động từ", "Tính từ", "Mẫu câu", 
+       - "Sản xuất" (SMT, Máy móc), "Chất lượng" (QC/QA), "Nhân sự", "Văn phòng", "Thời gian/Địa điểm", "Khác".
+    `
+  });
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: { parts },
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            text: { type: Type.STRING },
+            pinyin: { type: Type.STRING },
+            meaning: { type: Type.STRING },
+            hanViet: { type: Type.STRING },
+            category: { type: Type.STRING }
+          }
+        }
+      }
+    }
+  });
+
+  try {
+    return JSON.parse(response.text || "[]");
+  } catch (e) {
+    console.error("Lỗi parse từ vựng:", e);
+    return [];
+  }
+};
+
 export const analyzeImageAndExtractText = async (base64Images: string[]): Promise<SentenceAnalysis[]> => {
   const imageParts = base64Images.map(base64 => ({
     inlineData: { data: base64, mimeType: 'image/jpeg' }
@@ -45,7 +99,8 @@ export const analyzeImageAndExtractText = async (base64Images: string[]): Promis
                   text: { type: Type.STRING },
                   pinyin: { type: Type.STRING },
                   meaning: { type: Type.STRING },
-                  hanViet: { type: Type.STRING }
+                  hanViet: { type: Type.STRING },
+                  category: { type: Type.STRING, description: "Loại từ (Danh/Động/Tính) hoặc Chủ đề (Sản xuất/QC...)" }
                 }
               }
             }
@@ -72,7 +127,7 @@ export const generateMindmap = async (words: {text: string, pinyin: string, mean
     DANH SÁCH TỪ VỰNG: ${wordList}
     
     CÁC NHÓM ƯU TIÊN PHÂN LOẠI:
-    1. Ngữ pháp: Danh từ, Động từ, Tính từ, Trạng từ, Liên từ, Trợ từ, Lượng từ.
+    1. Ngữ pháp: Danh từ, Động từ, Tính từ, Trạng từ, Liên từ, Trợ từ, Lượng từ, Mẫu câu.
     2. Không gian/Thời gian: Phương hướng, Vị trí, Thời gian, Thứ tự.
     3. Chuyên ngành Công nghiệp: 
        - Sản xuất (SMT, Cơ khí, Máy móc, Bảo trì, Thiết bị).
