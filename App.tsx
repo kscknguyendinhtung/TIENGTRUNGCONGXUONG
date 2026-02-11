@@ -4,9 +4,10 @@ import { AppTab, USERS, SentenceAnalysis, Flashcard } from './types';
 import { FlashcardView } from './components/FlashcardView';
 import { ReadingView } from './components/ReadingView';
 import { GrammarView } from './components/GrammarView';
-import { syncUserSheet, fetchPublicSheetCsv } from './services/geminiService';
+import { syncVocabData, syncReadingData, fetchFromScript, fetchPublicSheetCsv } from './services/geminiService';
 
-const DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxN75HBHoEdyp1WV8Lrh18WyDoWNkBgpwzi2S6Q9BjIC35_BXzWBLFGVKoXzs37CsY3/exec";
+const DEFAULT_READING_SCRIPT = "https://script.google.com/macros/s/AKfycbzdN-mfGNk1Q4vNekSzxVl7msBzJDaMwhjoQTJpW1b6x7vq-GF3fjWyTgxvFI9phVtrHA/exec";
+const DEFAULT_VOCAB_SCRIPT = "https://script.google.com/macros/s/AKfycbxN75HBHoEdyp1WV8Lrh18WyDoWNkBgpwzi2S6Q9BjIC35_BXzWBLFGVKoXzs37CsY3/exec";
 const TONY_SHEET_URL = "https://docs.google.com/spreadsheets/d/1lm5zQSzWfqayTM8nJttDLqwIfmRN7FeOIfT9HthYQqg/edit";
 
 const App: React.FC = () => {
@@ -14,14 +15,14 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<string | null>(localStorage.getItem('current_user'));
   const [showSyncModal, setShowSyncModal] = useState(false);
   
-  const [scriptUrl, setScriptUrl] = useState(() => {
-    const stored = localStorage.getItem('global_script_url');
-    // Force update: Nếu URL trong máy user khác URL mặc định mới, tự động cập nhật lại.
-    if (stored !== DEFAULT_SCRIPT_URL) {
-      localStorage.setItem('global_script_url', DEFAULT_SCRIPT_URL);
-      return DEFAULT_SCRIPT_URL;
-    }
-    return stored || DEFAULT_SCRIPT_URL;
+  // Script 1: Reading/Grammar
+  const [readingScriptUrl, setReadingScriptUrl] = useState(() => {
+    return localStorage.getItem('reading_script_url') || DEFAULT_READING_SCRIPT;
+  });
+
+  // Script 2: Vocabulary
+  const [vocabScriptUrl, setVocabScriptUrl] = useState(() => {
+    return localStorage.getItem('vocab_script_url') || DEFAULT_VOCAB_SCRIPT;
   });
   
   const [sheetUrl, setSheetUrl] = useState(() => {
@@ -30,10 +31,8 @@ const App: React.FC = () => {
     return user ? (localStorage.getItem(`sheet_url_${user}`) || "") : "";
   });
   
-  // Sync Status: 'idle' | 'pending' (waiting to send) | 'syncing' (sending) | 'error'
   const [syncState, setSyncState] = useState<'idle' | 'pending' | 'syncing' | 'error'>('idle');
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const [stats, setStats] = useState({ vocabCount: 0, masteredCount: 0, lessonsCount: 0 });
 
   const loadStats = useCallback((user: string) => {
@@ -54,83 +53,30 @@ const App: React.FC = () => {
     });
   }, []);
 
-  useEffect(() => {
-    // Đảm bảo URL luôn là URL mới nhất khi khởi động App
-    if (scriptUrl !== DEFAULT_SCRIPT_URL) {
-       setScriptUrl(DEFAULT_SCRIPT_URL);
-       localStorage.setItem('global_script_url', DEFAULT_SCRIPT_URL);
-    }
-    if (currentUser) loadStats(currentUser);
-  }, [currentUser, activeTab, loadStats, scriptUrl]);
-
-  // --- DEBOUNCED SYNC LOGIC ---
-  const triggerCloudBackup = useCallback((user: string) => {
-    if (!scriptUrl) return;
-    
-    // 1. Clear previous timer if exists (reset debounce)
-    if (syncTimeoutRef.current) {
-      clearTimeout(syncTimeoutRef.current);
-    }
-
-    // 2. Set UI to "Pending" (Waiting for user to stop typing/clicking)
-    setSyncState('pending');
-
-    // 3. Set new timer (Execute after 2 seconds of inactivity)
-    syncTimeoutRef.current = setTimeout(async () => {
-      setSyncState('syncing');
-      try {
-        // Collect Data
-        const manualData: Flashcard[] = JSON.parse(localStorage.getItem(`manual_words_${user}`) || '[]');
-        const readingData: SentenceAnalysis[] = JSON.parse(localStorage.getItem(`reading_${user}`) || '[]');
-        const masteryData: Record<string, boolean> = JSON.parse(localStorage.getItem(`mastery_${user}`) || '{}');
-
-        // Merge Data
-        const mergedMap = new Map<string, Flashcard>();
-        manualData.forEach(card => {
-          mergedMap.set(card.word, { ...card, mastered: !!masteryData[card.word] });
-        });
-        readingData.forEach(lesson => {
-          lesson.words.forEach(w => {
-            if (!mergedMap.has(w.text)) {
-              mergedMap.set(w.text, {
-                id: `read-${w.text}`,
-                word: w.text,
-                pinyin: w.pinyin,
-                hanViet: w.hanViet,
-                meaning: w.meaning,
-                category: w.category || 'Bài đọc',
-                mastered: !!masteryData[w.text],
-                isManual: false
-              });
-            } else {
-               const existing = mergedMap.get(w.text)!;
-               mergedMap.set(w.text, { ...existing, mastered: !!masteryData[w.text] });
-            }
-          });
-        });
-
-        const finalCards = Array.from(mergedMap.values());
-        console.log(`Auto-syncing ${finalCards.length} items for ${user} to ${scriptUrl}...`);
-
-        // Send to Sheet
-        await syncUserSheet(scriptUrl, user, finalCards);
-        
-        setSyncState('idle');
-        loadStats(user);
-      } catch (e) {
-        console.error("Sync failed", e);
-        setSyncState('error');
-      }
-    }, 2000); // 2000ms debounce
-  }, [scriptUrl, loadStats]);
-
-  const triggerCloudRestore = useCallback(async () => {
-    if (!sheetUrl || !currentUser) return;
+  // --- STARTUP LOGIC: Load BOTH Scripts ---
+  const loadCloudData = async (user: string) => {
     setSyncState('syncing');
+    console.log("Loading Cloud Data for:", user);
+    
     try {
-      const cloudData = await fetchPublicSheetCsv(sheetUrl);
-      if (cloudData && cloudData.length > 0) {
-         const restoredCards: Flashcard[] = cloudData.map((d, i) => ({
+      // Parallel Fetch
+      const [readingRes, vocabRes] = await Promise.all([
+        fetchFromScript(readingScriptUrl, user),
+        fetchFromScript(vocabScriptUrl, user)
+      ]);
+
+      let hasUpdate = false;
+
+      // 1. Process Reading Script (Script 1)
+      if (readingRes && readingRes.reading && Array.isArray(readingRes.reading)) {
+        localStorage.setItem(`reading_${user}`, JSON.stringify(readingRes.reading));
+        console.log(`Loaded ${readingRes.reading.length} lessons from Script 1`);
+        hasUpdate = true;
+      }
+
+      // 2. Process Vocab Script (Script 2)
+      if (vocabRes && vocabRes.cards && Array.isArray(vocabRes.cards)) {
+         const restoredCards: Flashcard[] = vocabRes.cards.map((d: any, i: number) => ({
              id: `restored-${i}`,
              word: d.word,
              pinyin: d.pinyin,
@@ -140,27 +86,106 @@ const App: React.FC = () => {
              mastered: d.mastered,
              isManual: true
          }));
-
-         localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(restoredCards));
+         localStorage.setItem(`manual_words_${user}`, JSON.stringify(restoredCards));
          
          const newMastery: Record<string, boolean> = {};
          restoredCards.forEach(c => {
              if (c.mastered) newMastery[c.word] = true;
          });
-         localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(newMastery));
-
-         loadStats(currentUser);
-         alert(`Đã tải về ${restoredCards.length} từ vựng mới nhất từ Sheet!`);
-      } else {
-        alert("Không tìm thấy dữ liệu trên Sheet.");
+         localStorage.setItem(`mastery_${user}`, JSON.stringify(newMastery));
+         console.log(`Loaded ${restoredCards.length} words from Script 2`);
+         hasUpdate = true;
       }
-      setSyncState('idle');
+
+      loadStats(user);
+      if (hasUpdate) setSyncState('idle');
+      else {
+        // If script data empty, try fallback to Sheet CSV if available
+        if (sheetUrl) triggerCloudRestoreFromSheet(user); 
+        else setSyncState('idle');
+      }
+
     } catch (e) {
-      console.error(e);
+      console.error("Error loading cloud data", e);
       setSyncState('error');
-      alert("Lỗi khi tải dữ liệu.");
     }
-  }, [sheetUrl, currentUser, loadStats]);
+  };
+
+  const triggerCloudRestoreFromSheet = async (user: string) => {
+    if (!sheetUrl) return;
+    try {
+        const cloudData = await fetchPublicSheetCsv(sheetUrl);
+        if (cloudData && cloudData.length > 0) {
+            const restoredCards: Flashcard[] = cloudData.map((d, i) => ({
+                id: `restored-${i}`,
+                word: d.word,
+                pinyin: d.pinyin,
+                hanViet: d.hanViet,
+                meaning: d.meaning,
+                category: d.category,
+                mastered: d.mastered,
+                isManual: true
+            }));
+            localStorage.setItem(`manual_words_${user}`, JSON.stringify(restoredCards));
+            const newMastery: Record<string, boolean> = {};
+            restoredCards.forEach(c => { if (c.mastered) newMastery[c.word] = true; });
+            localStorage.setItem(`mastery_${user}`, JSON.stringify(newMastery));
+            loadStats(user);
+        }
+        setSyncState('idle');
+    } catch(e) { setSyncState('error'); }
+  };
+
+  useEffect(() => {
+    // Ensure defaults are set if missing (for first time load of code update)
+    if (!localStorage.getItem('reading_script_url')) {
+       localStorage.setItem('reading_script_url', DEFAULT_READING_SCRIPT);
+       setReadingScriptUrl(DEFAULT_READING_SCRIPT);
+    }
+    if (!localStorage.getItem('vocab_script_url')) {
+       localStorage.setItem('vocab_script_url', DEFAULT_VOCAB_SCRIPT);
+       setVocabScriptUrl(DEFAULT_VOCAB_SCRIPT);
+    }
+
+    if (currentUser) {
+       loadStats(currentUser);
+       // Trigger load on mount if user exists
+       loadCloudData(currentUser);
+    }
+  }, [currentUser]); 
+
+  // --- SAVE LOGIC: Split to 2 Scripts ---
+  const triggerCloudBackup = useCallback((user: string) => {
+    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    setSyncState('pending');
+
+    syncTimeoutRef.current = setTimeout(async () => {
+      setSyncState('syncing');
+      try {
+        // 1. Prepare Vocab Data -> Script 2
+        const manualData: Flashcard[] = JSON.parse(localStorage.getItem(`manual_words_${user}`) || '[]');
+        const masteryData: Record<string, boolean> = JSON.parse(localStorage.getItem(`mastery_${user}`) || '{}');
+        const vocabPayload = manualData.map(c => ({ ...c, mastered: !!masteryData[c.word] }));
+
+        // 2. Prepare Reading Data -> Script 1
+        const readingData: SentenceAnalysis[] = JSON.parse(localStorage.getItem(`reading_${user}`) || '[]');
+
+        // Parallel Sync
+        await Promise.all([
+          vocabScriptUrl ? syncVocabData(vocabScriptUrl, user, vocabPayload) : Promise.resolve(),
+          readingScriptUrl ? syncReadingData(readingScriptUrl, user, readingData) : Promise.resolve()
+        ]);
+        
+        console.log("Synced to both scripts successfully");
+        setSyncState('idle');
+        loadStats(user);
+      } catch (e) {
+        console.error("Sync failed", e);
+        setSyncState('error');
+      }
+    }, 2000); // 2s debounce
+  }, [vocabScriptUrl, readingScriptUrl, loadStats]);
+
 
   const selectUser = async (user: string) => {
     setCurrentUser(user);
@@ -175,9 +200,10 @@ const App: React.FC = () => {
     
     setSheetUrl(newSheetUrl);
     localStorage.setItem('global_sheet_url', newSheetUrl);
-
-    loadStats(user);
     setActiveTab(AppTab.HOME);
+    
+    // LOAD DATA ON USER SELECT
+    loadCloudData(user);
   };
 
   const logout = () => {
@@ -225,8 +251,7 @@ const App: React.FC = () => {
           currentUser={currentUser!} 
           onDataChange={() => triggerCloudBackup(currentUser!)}
           sheetUrl={sheetUrl}
-          onPull={triggerCloudRestore}
-          scriptUrl={scriptUrl} // Pass scriptUrl as prop ensures consistency
+          scriptUrl={vocabScriptUrl} // Use Vocab Script URL
         />;
       case AppTab.READING: return <ReadingView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} />;
       case AppTab.GRAMMAR: return <GrammarView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} />;
@@ -280,24 +305,34 @@ const App: React.FC = () => {
                        syncState === 'error' ? 'bg-rose-500' : 'bg-emerald-400'
                    }`}></div>
                    <h3 className="text-[8px] font-black uppercase tracking-[0.3em] opacity-60">
-                       {syncState === 'syncing' ? 'ĐANG LƯU...' : 
+                       {syncState === 'syncing' ? 'ĐANG ĐỒNG BỘ...' : 
                         syncState === 'pending' ? 'CHỜ LƯU...' : 
-                        syncState === 'error' ? 'LỖI LƯU' : 'ĐÃ ĐỒNG BỘ'}
+                        syncState === 'error' ? 'LỖI ĐỒNG BỘ' : 'ĐÃ KẾT NỐI'}
                    </h3>
                 </div>
-                <p className="text-xl font-black leading-tight mb-6 max-w-[200px]">Dữ liệu được tự động lưu lên Sheet sau 2s.</p>
-                <button 
-                  onClick={() => triggerCloudBackup(currentUser!)} 
-                  disabled={syncState === 'syncing'}
-                  className="bg-white text-slate-900 px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 disabled:opacity-50"
-                >
-                  {syncState === 'syncing' ? (
-                    <div className="w-3 h-3 border-2 border-slate-900/30 border-t-slate-900 rounded-full animate-spin"></div>
-                  ) : (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                  )}
-                  LƯU NGAY
-                </button>
+                <p className="text-xl font-black leading-tight mb-6 max-w-[200px]">Dữ liệu được tự động tải về khi mở App và lưu sau 2s.</p>
+                <div className="flex gap-2">
+                    <button 
+                    onClick={() => triggerCloudBackup(currentUser!)} 
+                    disabled={syncState === 'syncing'}
+                    className="bg-white text-slate-900 px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 disabled:opacity-50 flex-1 justify-center"
+                    >
+                    {syncState === 'syncing' ? (
+                        <div className="w-3 h-3 border-2 border-slate-900/30 border-t-slate-900 rounded-full animate-spin"></div>
+                    ) : (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                    )}
+                    LƯU NGAY
+                    </button>
+                    <button 
+                    onClick={() => loadCloudData(currentUser!)} 
+                    disabled={syncState === 'syncing'}
+                    className="bg-blue-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 disabled:opacity-50 flex-1 justify-center"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3 3m0 0l-3-3m3 3V8"/></svg>
+                    TẢI VỀ
+                    </button>
+                </div>
               </div>
             </div>
 
@@ -339,32 +374,48 @@ const App: React.FC = () => {
          <div className="fixed top-4 right-4 z-[60] flex items-center gap-2 bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-full shadow-lg">
              <div className={`w-1.5 h-1.5 rounded-full ${syncState === 'syncing' ? 'bg-amber-400 animate-pulse' : 'bg-blue-400'}`}></div>
              <span className="text-[7px] font-black text-white uppercase tracking-widest">
-                {syncState === 'syncing' ? 'Đang lưu...' : 'Chờ lưu...'}
+                {syncState === 'syncing' ? 'Đang tải...' : 'Chờ lưu...'}
              </span>
          </div>
       )}
       
       {showSyncModal && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl flex items-center justify-center p-6 z-[100]">
-          <div className="bg-white w-full max-w-sm p-8 rounded-[40px] shadow-2xl">
+          <div className="bg-white w-full max-w-sm p-8 rounded-[40px] shadow-2xl overflow-y-auto max-h-[90vh]">
             <h2 className="text-2xl font-black mb-1 text-slate-900 tracking-tighter uppercase">Cài đặt Cloud</h2>
             <p className="text-slate-400 text-[10px] font-bold mb-8 uppercase tracking-wider">Cấu hình URL để đồng bộ dữ liệu.</p>
             <div className="space-y-6">
+              
               <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Apps Script URL (Backend API)</label>
+                <label className="text-[9px] font-black text-blue-500 uppercase tracking-widest ml-1 mb-2 block">Script 1: Luyện đọc & Ngữ pháp (Nặng)</label>
                 <input 
                   type="text" 
-                  value={scriptUrl} 
+                  value={readingScriptUrl} 
                   onChange={(e) => {
-                    setScriptUrl(e.target.value);
-                    localStorage.setItem('global_script_url', e.target.value);
+                    setReadingScriptUrl(e.target.value);
+                    localStorage.setItem('reading_script_url', e.target.value);
                   }}
                   placeholder="https://script.google.com/..."
-                  className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs focus:border-blue-500 shadow-inner"
+                  className="w-full px-5 py-4 bg-blue-50 border border-blue-100 rounded-2xl outline-none font-bold text-xs focus:border-blue-500 shadow-inner text-blue-900"
                 />
               </div>
+
               <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Google Sheets URL (Để sửa trực tiếp)</label>
+                <label className="text-[9px] font-black text-rose-500 uppercase tracking-widest ml-1 mb-2 block">Script 2: Từ vựng & Tiến độ (Nhẹ)</label>
+                <input 
+                  type="text" 
+                  value={vocabScriptUrl} 
+                  onChange={(e) => {
+                    setVocabScriptUrl(e.target.value);
+                    localStorage.setItem('vocab_script_url', e.target.value);
+                  }}
+                  placeholder="https://script.google.com/..."
+                  className="w-full px-5 py-4 bg-rose-50 border border-rose-100 rounded-2xl outline-none font-bold text-xs focus:border-rose-500 shadow-inner text-rose-900"
+                />
+              </div>
+
+              <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Google Sheets URL (Public CSV)</label>
                 <input 
                   type="text" 
                   value={sheetUrl} 
@@ -380,8 +431,9 @@ const App: React.FC = () => {
                   className={`w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs focus:border-blue-500 shadow-inner ${currentUser === 'Tony' ? 'opacity-60 cursor-not-allowed' : ''}`}
                 />
               </div>
+
             </div>
-            <button onClick={() => setShowSyncModal(false)} className="w-full mt-8 py-5 bg-slate-900 text-white rounded-2xl font-black text-[10px] tracking-widest shadow-lg active:scale-95 transition-all uppercase">Lưu Cấu Hình</button>
+            <button onClick={() => setShowSyncModal(false)} className="w-full mt-8 py-5 bg-slate-900 text-white rounded-2xl font-black text-[10px] tracking-widest shadow-lg active:scale-95 transition-all uppercase">Lưu & Đóng</button>
           </div>
         </div>
       )}

@@ -8,7 +8,6 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
 const cleanJsonString = (text: string): string => {
   if (!text) return "[]";
   let clean = text.trim();
-  // Remove ```json and ``` wrap
   if (clean.startsWith("```")) {
     clean = clean.replace(/^```(json)?\s*/i, "").replace(/\s*```$/, "");
   }
@@ -38,12 +37,31 @@ const parseCSV = (str: string) => {
   return arr;
 };
 
-// --- NEW FUNCTION: Sync (Overwrite) User Sheet ---
-export const syncUserSheet = async (scriptUrl: string, user: string, cards: Flashcard[]) => {
+// --- SYNC FUNCTION 1: READING & GRAMMAR (Script 1) ---
+export const syncReadingData = async (scriptUrl: string, user: string, readingData: SentenceAnalysis[]) => {
   if (!scriptUrl || !scriptUrl.startsWith("http")) return false;
-  
   const payload = {
     user: user,
+    action: 'save_reading', // Tag action for script handling
+    reading: readingData
+  };
+  try {
+    await fetch(scriptUrl, { 
+      method: 'POST', 
+      mode: 'no-cors', 
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload) 
+    });
+    return true;
+  } catch (e) { console.error("Reading Sync Error", e); return false; }
+};
+
+// --- SYNC FUNCTION 2: VOCABULARY (Script 2) ---
+export const syncVocabData = async (scriptUrl: string, user: string, cards: Flashcard[]) => {
+  if (!scriptUrl || !scriptUrl.startsWith("http")) return false;
+  const payload = {
+    user: user,
+    action: 'save_vocab', // Tag action for script handling
     cards: cards.map(c => ({
       word: c.word,
       pinyin: c.pinyin,
@@ -53,9 +71,7 @@ export const syncUserSheet = async (scriptUrl: string, user: string, cards: Flas
       mastered: c.mastered || false
     }))
   };
-
   try {
-    // mode: 'no-cors' is necessary for simple fetch to GAS doPost without complex CORS setup
     await fetch(scriptUrl, { 
       method: 'POST', 
       mode: 'no-cors', 
@@ -63,14 +79,24 @@ export const syncUserSheet = async (scriptUrl: string, user: string, cards: Flas
       body: JSON.stringify(payload) 
     });
     return true;
-  } catch (e) { 
-    console.error("Sync Error", e);
-    return false; 
+  } catch (e) { console.error("Vocab Sync Error", e); return false; }
+};
+
+// --- GENERIC FETCH FUNCTION (GET) ---
+export const fetchFromScript = async (scriptUrl: string, user: string) => {
+  if (!scriptUrl || !scriptUrl.startsWith("http")) return null;
+  try {
+    const url = `${scriptUrl}?user=${encodeURIComponent(user)}&action=get`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (e) {
+    console.error(`Fetch Error for ${scriptUrl}`, e);
+    return null;
   }
 };
-// ------------------------------------------------
 
-// Fetch data from Public Google Sheet (CSV format via GVIZ API)
+// ... existing code ...
 export const fetchPublicSheetCsv = async (sheetUrl: string): Promise<any[]> => {
   try {
     const match = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
@@ -236,15 +262,35 @@ export const generateMindmap = async (words: {text: string, pinyin: string, mean
 
 export const speakText = (text: string, lang: 'cn' | 'vn', speed: number = 1.0) => {
   if (!('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel();
-  setTimeout(() => {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.text = text.trim();
-    utterance.rate = speed;
-    utterance.lang = lang === 'cn' ? 'zh-CN' : 'vi-VN';
-    window.speechSynthesis.speak(utterance);
-  }, 50);
-};
+  const synth = window.speechSynthesis;
+  if (synth.paused) synth.resume();
+  synth.cancel();
 
+  const utterance = new SpeechSynthesisUtterance(text.trim());
+  utterance.rate = speed;
+  utterance.volume = 1.0; 
+
+  if (lang === 'cn') {
+    utterance.lang = 'zh-CN';
+  } else {
+    utterance.lang = 'vi-VN';
+  }
+
+  const voices = synth.getVoices();
+  if (voices.length > 0) {
+    let selectedVoice = null;
+    if (lang === 'cn') {
+        selectedVoice = voices.find(v => v.lang === 'zh-CN' && !v.name.includes("Siri")) || 
+                        voices.find(v => v.lang === 'zh-CN') || 
+                        voices.find(v => v.lang.startsWith('zh')); 
+    } else {
+        selectedVoice = voices.find(v => v.lang === 'vi-VN') || 
+                        voices.find(v => v.lang.startsWith('vi'));
+    }
+    if (selectedVoice) utterance.voice = selectedVoice;
+  }
+  synth.speak(utterance);
+};
+// Remove old functions to avoid confusion
 export const syncToGoogleSheets = async (scriptUrl: string, data: any) => { return false; };
-export const fetchFromGoogleSheets = async (scriptUrl: string, user: string) => { return null; };
+export const syncUserSheet = async (scriptUrl: string, user: string, cards: any[], reading: any[]) => { return false; };

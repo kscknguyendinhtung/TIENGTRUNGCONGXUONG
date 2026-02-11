@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Flashcard, SentenceAnalysis, MindmapCategory } from '../types';
-import { speakText, extractVocabulary, fetchPublicSheetCsv, syncUserSheet } from '../services/geminiService';
+import { speakText, extractVocabulary, fetchPublicSheetCsv, syncVocabData } from '../services/geminiService';
 import { MindmapView } from './MindmapView';
 
 interface FlashcardViewProps { 
@@ -9,7 +9,7 @@ interface FlashcardViewProps {
   onDataChange?: () => void;
   sheetUrl?: string;
   onPull?: () => void;
-  scriptUrl: string; // New prop required
+  scriptUrl: string; // This will now be the Vocab Script URL
 }
 
 export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDataChange, sheetUrl, onPull, scriptUrl }) => {
@@ -46,21 +46,21 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
 
   // Auto Sync State
   const [isSyncing, setIsSyncing] = useState(false);
-  const hasAutoSynced = useRef(false); // Ref to prevent double sync on strict mode
+  const hasAutoSynced = useRef(false);
 
   useEffect(() => {
-    // 1. Load Local Data First (Instant)
+    // 1. Load Local Data First
     loadCards();
 
-    // 2. Auto Sync in Background (Silent)
+    // 2. Auto Sync in Background (from Sheet)
     const runAutoSync = async () => {
       if (sheetUrl && !hasAutoSynced.current && !isSyncing) {
         hasAutoSynced.current = true;
-        await handleAutoSync(true); // true = silent mode (no alerts)
+        await handleAutoSync(true); 
       }
     };
     runAutoSync();
-  }, [currentUser, sheetUrl]); // Re-run if user or sheet changes
+  }, [currentUser, sheetUrl]);
 
   const loadCards = () => {
     const mindmapDataRaw = localStorage.getItem(`mindmap_${currentUser}`);
@@ -190,7 +190,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
 
   const deleteSelectedWords = async () => {
     if (selectedWords.size === 0) return;
-    if (!confirm(`Xóa ${selectedWords.size} từ? Dữ liệu trên Sheet cũng sẽ được cập nhật (nếu đã cấu hình Apps Script).`)) return;
+    if (!confirm(`Xóa ${selectedWords.size} từ?`)) return;
 
     let updatedManual: Flashcard[] = [];
     try {
@@ -207,10 +207,10 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     setIsSelectionMode(false);
     loadCards();
     
-    // Write changes to Sheet (Using Prop)
+    // Write changes to Script 2 (Using Prop which is vocabScriptUrl)
     if (scriptUrl) {
       setIsSyncing(true);
-      await syncUserSheet(scriptUrl, currentUser, updatedManual);
+      await syncVocabData(scriptUrl, currentUser, updatedManual);
       setIsSyncing(false);
     }
     
@@ -218,7 +218,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
   };
 
   const deleteWord = async (word: string) => {
-    if (!confirm(`Xóa từ "${word}"? Sẽ cập nhật lại Sheet.`)) return;
+    if (!confirm(`Xóa từ "${word}"?`)) return;
     
     let updatedManual: Flashcard[] = [];
     try {
@@ -233,17 +233,15 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     
     loadCards();
 
-    // Write changes to Sheet (Using Prop)
+    // Write changes to Script 2
     if (scriptUrl) {
       setIsSyncing(true);
-      await syncUserSheet(scriptUrl, currentUser, updatedManual);
+      await syncVocabData(scriptUrl, currentUser, updatedManual);
       setIsSyncing(false);
     }
 
     if (onDataChange) onDataChange();
   };
-
-  // -------------------------
 
   const toggleMastery = async (card: Flashcard) => {
     // 1. Update Mastery Map
@@ -261,10 +259,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
 
     // 4. Trigger Sync to Cloud
-    // Call onDataChange which triggers triggerCloudBackup in App.tsx
-    if (onDataChange) {
-        onDataChange();
-    }
+    if (onDataChange) onDataChange();
   };
 
   const toggleSelectionMode = () => {
@@ -331,9 +326,9 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         setShowAddModal(false);
         loadCards();
         
-        // Write Sync (Using Prop)
+        // Write Sync
         if (scriptUrl) {
-          await syncUserSheet(scriptUrl, currentUser, updatedList);
+          await syncVocabData(scriptUrl, currentUser, updatedList);
         }
 
         if (onDataChange) onDataChange();
@@ -380,9 +375,9 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         setShowImportModal(false);
         loadCards();
         
-        // Write Sync (Using Prop)
+        // Write Sync
         if (scriptUrl) {
-          await syncUserSheet(scriptUrl, currentUser, updatedList);
+          await syncVocabData(scriptUrl, currentUser, updatedList);
         }
 
         if (onDataChange) onDataChange();
@@ -406,9 +401,8 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
   };
 
   const handleAutoSync = async (isSilent = false) => {
-    // Read from Google Sheet via CSV (Fast & Public)
     if (!sheetUrl) {
-      if (!isSilent) alert("Vui lòng cấu hình URL Google Sheets trước (vào Home > Cài đặt).");
+      if (!isSilent) alert("Vui lòng cấu hình URL Google Sheets trước.");
       return;
     }
     
@@ -416,22 +410,20 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     try {
       const newData = await fetchPublicSheetCsv(sheetUrl);
       
-      // CASE 1: Sheet is Empty or New Data is Empty
       if (newData.length === 0) {
         if (!isSilent) {
-          if (window.confirm("Sheet đang TRỐNG (hoặc không thể đọc).\nBạn có muốn XÓA SẠCH dữ liệu trên App để đồng bộ với Sheet không?")) {
-            localStorage.setItem(`manual_words_${currentUser}`, '[]');
-            localStorage.setItem(`mastery_${currentUser}`, '{}');
-            setCards([]);
-            alert("Đã xóa sạch dữ liệu trên App theo Sheet.");
-            if (onDataChange) onDataChange();
-          }
+           if (window.confirm("Sheet đang TRỐNG.\nBạn có muốn XÓA SẠCH dữ liệu trên App để giống Sheet không?")) {
+              localStorage.setItem(`manual_words_${currentUser}`, '[]');
+              localStorage.setItem(`mastery_${currentUser}`, '{}');
+              setCards([]);
+              alert("Đã xóa sạch dữ liệu trên App.");
+              if (onDataChange) onDataChange();
+           }
         }
         setIsSyncing(false);
         return;
       }
       
-      // Format new cards
       const newCards: Flashcard[] = newData.map((d, i) => ({
         id: `auto-${Date.now()}-${i}`,
         word: d.word,
@@ -443,20 +435,18 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         mastered: d.mastered
       }));
       
-      let updatedManual: Flashcard[] = [];
-      let mode = 'merge';
+      let mode = 'overwrite'; 
 
-      // CASE 2: Sheet has data. Ask user for strategy if manual trigger.
       if (!isSilent) {
-         if (window.confirm(`Tìm thấy ${newCards.length} từ trên Sheet.\n\nNhấn OK để GHI ĐÈ (Dữ liệu App sẽ giống hệt Sheet).\nNhấn Cancel để GỘP (Giữ từ cũ trên App + Thêm từ mới).`)) {
-            mode = 'overwrite';
+         if (!window.confirm(`Tìm thấy ${newCards.length} từ trên Sheet.\n\nNhấn OK để ĐỒNG BỘ 100% theo Sheet.\nNhấn Cancel để GỘP.`)) {
+            mode = 'merge';
          }
       }
 
+      let updatedManual: Flashcard[] = [];
       if (mode === 'overwrite') {
          updatedManual = newCards;
       } else {
-         // Merge Mode (Default)
          const raw = localStorage.getItem(`manual_words_${currentUser}`);
          let manual: Flashcard[] = raw ? JSON.parse(raw) : [];
          const existingWords = new Set(newCards.map(c => c.word));
@@ -468,23 +458,24 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
       
       const currentMastery = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
       
-      // If overwrite, we might want to reset mastery or sync it from sheet
       if (mode === 'overwrite') {
-          // Reset mastery map to match sheet exactly
           const newMasteryMap: Record<string, boolean> = {};
           newCards.forEach(c => {
-             if (c.mastered) newMasteryMap[c.word] = true;
+             if (c.mastered) {
+                newMasteryMap[c.word] = true; 
+             } else if (currentMastery[c.word]) {
+                newMasteryMap[c.word] = true;
+             }
           });
           localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(newMasteryMap));
       } else {
-          // Merge mastery
           newCards.forEach(c => {
             if (c.mastered) currentMastery[c.word] = true;
           });
           localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(currentMastery));
       }
 
-      if (!isSilent) alert(`Đã đồng bộ xong (${mode === 'overwrite' ? 'Ghi đè' : 'Gộp'}).`);
+      if (!isSilent) alert(`Đã đồng bộ xong (${mode === 'overwrite' ? 'Theo Sheet' : 'Gộp'}).`);
       loadCards();
       
       if (onDataChange) onDataChange();
@@ -503,7 +494,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
       <h3 className="text-lg font-black text-slate-300 uppercase tracking-widest">Đang tải từ vựng...</h3>
        <div className="mt-4 flex flex-col gap-2 items-center">
          <div className="w-6 h-6 border-2 border-slate-200 border-t-rose-500 rounded-full animate-spin"></div>
-         <p className="text-[10px] text-slate-400">Đang đồng bộ từ Sheet...</p>
+         <p className="text-[10px] text-slate-400">Đang đồng bộ từ Script & Sheet...</p>
        </div>
       <div className="flex flex-col gap-3 mt-8">
         <button onClick={() => setShowAddModal(true)} className="bg-rose-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest shadow-lg active:scale-95 uppercase">Thêm từ đầu tiên</button>
@@ -774,29 +765,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
                  {isProcessing && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>}
                  {isProcessing ? 'Đang phân tích...' : 'Thêm ngay'}
                </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showImportModal && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl flex items-center justify-center p-6 z-[160]">
-          <div className="bg-white w-full max-w-sm p-8 rounded-[40px] shadow-2xl">
-            <h2 className="text-xl font-black mb-1 text-slate-900 tracking-tighter uppercase">Nhập từ Excel/Sheet</h2>
-            <p className="text-slate-400 text-[10px] font-bold mb-6 uppercase tracking-wider">
-               Copy các dòng từ Sheet (bao gồm cột Hán tự, Pinyin...) rồi dán vào đây.
-            </p>
-            
-            <textarea 
-               value={importText}
-               onChange={(e) => setImportText(e.target.value)}
-               placeholder="Dán dữ liệu tại đây..."
-               className="w-full h-40 px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs text-slate-700 resize-none focus:border-blue-500 transition-colors mb-6"
-            />
-
-            <div className="flex gap-3">
-               <button onClick={() => setShowImportModal(false)} className="flex-1 py-4 bg-slate-100 text-slate-400 rounded-2xl font-black text-[10px] tracking-widest uppercase active:scale-95 transition-transform">Hủy</button>
-               <button onClick={handleProcessImport} disabled={!importText.trim()} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-[10px] tracking-widest shadow-lg uppercase active:scale-95 transition-transform">Xử lý Nhập</button>
             </div>
           </div>
         </div>
