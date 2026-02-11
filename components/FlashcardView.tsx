@@ -9,9 +9,10 @@ interface FlashcardViewProps {
   onDataChange?: () => void;
   sheetUrl?: string;
   onPull?: () => void;
+  scriptUrl: string; // New prop required
 }
 
-export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDataChange, sheetUrl, onPull }) => {
+export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDataChange, sheetUrl, onPull, scriptUrl }) => {
   const [cards, setCards] = useState<Flashcard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
@@ -45,13 +46,21 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
 
   // Auto Sync State
   const [isSyncing, setIsSyncing] = useState(false);
-
-  // Script URL for write operations
-  const scriptUrl = localStorage.getItem('global_script_url') || "";
+  const hasAutoSynced = useRef(false); // Ref to prevent double sync on strict mode
 
   useEffect(() => {
+    // 1. Load Local Data First (Instant)
     loadCards();
-  }, [currentUser, onPull]);
+
+    // 2. Auto Sync in Background (Silent)
+    const runAutoSync = async () => {
+      if (sheetUrl && !hasAutoSynced.current && !isSyncing) {
+        hasAutoSynced.current = true;
+        await handleAutoSync(true); // true = silent mode (no alerts)
+      }
+    };
+    runAutoSync();
+  }, [currentUser, sheetUrl]); // Re-run if user or sheet changes
 
   const loadCards = () => {
     const mindmapDataRaw = localStorage.getItem(`mindmap_${currentUser}`);
@@ -198,6 +207,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     setIsSelectionMode(false);
     loadCards();
     
+    // Write changes to Sheet (Using Prop)
     if (scriptUrl) {
       setIsSyncing(true);
       await syncUserSheet(scriptUrl, currentUser, updatedManual);
@@ -223,6 +233,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     
     loadCards();
 
+    // Write changes to Sheet (Using Prop)
     if (scriptUrl) {
       setIsSyncing(true);
       await syncUserSheet(scriptUrl, currentUser, updatedManual);
@@ -235,18 +246,25 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
   // -------------------------
 
   const toggleMastery = async (card: Flashcard) => {
+    // 1. Update Mastery Map
     const masteryMap = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
     const newState = !card.mastered;
     masteryMap[card.word] = newState;
     localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(masteryMap));
     
+    // 2. Update UI State
     setCards(prev => prev.map(c => c.word === card.word ? { ...c, mastered: newState } : c));
     
+    // 3. Update Manual List (IMPORTANT for sync)
     const manual = getManualWords();
     const updatedManual = manual.map(m => m.word === card.word ? { ...m, mastered: newState } : m);
     localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
 
-    if (onDataChange) onDataChange();
+    // 4. Trigger Sync to Cloud
+    // Call onDataChange which triggers triggerCloudBackup in App.tsx
+    if (onDataChange) {
+        onDataChange();
+    }
   };
 
   const toggleSelectionMode = () => {
@@ -313,6 +331,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         setShowAddModal(false);
         loadCards();
         
+        // Write Sync (Using Prop)
         if (scriptUrl) {
           await syncUserSheet(scriptUrl, currentUser, updatedList);
         }
@@ -361,6 +380,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         setShowImportModal(false);
         loadCards();
         
+        // Write Sync (Using Prop)
         if (scriptUrl) {
           await syncUserSheet(scriptUrl, currentUser, updatedList);
         }
@@ -385,19 +405,33 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     }
   };
 
-  const handleAutoSync = async () => {
-    // Uses the read-only GVIZ CSV endpoint for initial pulling
-    if (!sheetUrl) return alert("Vui lòng cấu hình URL Google Sheets trước (vào Home > Cài đặt).");
+  const handleAutoSync = async (isSilent = false) => {
+    // Read from Google Sheet via CSV (Fast & Public)
+    if (!sheetUrl) {
+      if (!isSilent) alert("Vui lòng cấu hình URL Google Sheets trước (vào Home > Cài đặt).");
+      return;
+    }
     
     setIsSyncing(true);
     try {
       const newData = await fetchPublicSheetCsv(sheetUrl);
+      
+      // CASE 1: Sheet is Empty or New Data is Empty
       if (newData.length === 0) {
-        alert("Không tải được dữ liệu.");
+        if (!isSilent) {
+          if (window.confirm("Sheet đang TRỐNG (hoặc không thể đọc).\nBạn có muốn XÓA SẠCH dữ liệu trên App để đồng bộ với Sheet không?")) {
+            localStorage.setItem(`manual_words_${currentUser}`, '[]');
+            localStorage.setItem(`mastery_${currentUser}`, '{}');
+            setCards([]);
+            alert("Đã xóa sạch dữ liệu trên App theo Sheet.");
+            if (onDataChange) onDataChange();
+          }
+        }
         setIsSyncing(false);
         return;
       }
       
+      // Format new cards
       const newCards: Flashcard[] = newData.map((d, i) => ({
         id: `auto-${Date.now()}-${i}`,
         word: d.word,
@@ -409,31 +443,55 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         mastered: d.mastered
       }));
       
-      const raw = localStorage.getItem(`manual_words_${currentUser}`);
-      let manual: Flashcard[] = raw ? JSON.parse(raw) : [];
-      const existingWords = new Set(newCards.map(c => c.word));
-      const filteredManual = manual.filter(m => !existingWords.has(m.word));
-      const updatedManual = [...filteredManual, ...newCards];
+      let updatedManual: Flashcard[] = [];
+      let mode = 'merge';
+
+      // CASE 2: Sheet has data. Ask user for strategy if manual trigger.
+      if (!isSilent) {
+         if (window.confirm(`Tìm thấy ${newCards.length} từ trên Sheet.\n\nNhấn OK để GHI ĐÈ (Dữ liệu App sẽ giống hệt Sheet).\nNhấn Cancel để GỘP (Giữ từ cũ trên App + Thêm từ mới).`)) {
+            mode = 'overwrite';
+         }
+      }
+
+      if (mode === 'overwrite') {
+         updatedManual = newCards;
+      } else {
+         // Merge Mode (Default)
+         const raw = localStorage.getItem(`manual_words_${currentUser}`);
+         let manual: Flashcard[] = raw ? JSON.parse(raw) : [];
+         const existingWords = new Set(newCards.map(c => c.word));
+         const filteredManual = manual.filter(m => !existingWords.has(m.word));
+         updatedManual = [...filteredManual, ...newCards];
+      }
       
       localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
       
       const currentMastery = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
-      newCards.forEach(c => {
-        if (c.mastered) currentMastery[c.word] = true;
-      });
-      localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(currentMastery));
+      
+      // If overwrite, we might want to reset mastery or sync it from sheet
+      if (mode === 'overwrite') {
+          // Reset mastery map to match sheet exactly
+          const newMasteryMap: Record<string, boolean> = {};
+          newCards.forEach(c => {
+             if (c.mastered) newMasteryMap[c.word] = true;
+          });
+          localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(newMasteryMap));
+      } else {
+          // Merge mastery
+          newCards.forEach(c => {
+            if (c.mastered) currentMastery[c.word] = true;
+          });
+          localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(currentMastery));
+      }
 
-      alert(`Đã tải về ${newCards.length} từ vựng từ Sheet.`);
+      if (!isSilent) alert(`Đã đồng bộ xong (${mode === 'overwrite' ? 'Ghi đè' : 'Gộp'}).`);
       loadCards();
       
-      // Optional: Sync back to the specific user script sheet to keep it in sync
-      if (scriptUrl) await syncUserSheet(scriptUrl, currentUser, updatedManual);
-
       if (onDataChange) onDataChange();
       
     } catch (e) {
       console.error(e);
-      alert("Lỗi đồng bộ.");
+      if (!isSilent) alert("Lỗi đồng bộ. Vui lòng kiểm tra lại Link Sheet.");
     } finally {
       setIsSyncing(false);
     }
@@ -442,11 +500,15 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
   if (cards.length === 0 && !showAddModal && !showImportModal) return (
     <div className="py-20 px-6 text-center flex flex-col items-center">
       <div className="text-6xl mb-6 opacity-20">🗂️</div>
-      <h3 className="text-lg font-black text-slate-300 uppercase tracking-widest">Chưa có từ vựng</h3>
-      <div className="flex flex-col gap-3 mt-6">
+      <h3 className="text-lg font-black text-slate-300 uppercase tracking-widest">Đang tải từ vựng...</h3>
+       <div className="mt-4 flex flex-col gap-2 items-center">
+         <div className="w-6 h-6 border-2 border-slate-200 border-t-rose-500 rounded-full animate-spin"></div>
+         <p className="text-[10px] text-slate-400">Đang đồng bộ từ Sheet...</p>
+       </div>
+      <div className="flex flex-col gap-3 mt-8">
         <button onClick={() => setShowAddModal(true)} className="bg-rose-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest shadow-lg active:scale-95 uppercase">Thêm từ đầu tiên</button>
-        <button onClick={handleAutoSync} disabled={isSyncing} className="bg-emerald-50 text-emerald-600 px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest shadow-sm active:scale-95 uppercase flex items-center justify-center gap-2">
-           {isSyncing ? <div className="w-3 h-3 border-2 border-emerald-600/30 border-t-emerald-600 rounded-full animate-spin"></div> : 'Đồng bộ từ Sheet'}
+        <button onClick={() => handleAutoSync(false)} disabled={isSyncing} className="bg-emerald-50 text-emerald-600 px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest shadow-sm active:scale-95 uppercase flex items-center justify-center gap-2">
+           {isSyncing ? 'Đang thử lại...' : 'Thử tải lại (Từ Sheet)'}
         </button>
       </div>
     </div>
@@ -589,13 +651,13 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         <div className="space-y-3 pb-20">
           <div className="flex flex-col gap-3">
              <div className="flex gap-2">
-               <button onClick={handleAutoSync} disabled={isSyncing} className="flex-1 bg-emerald-50 text-emerald-700 border border-emerald-200 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-sm">
+               <button onClick={() => handleAutoSync(false)} disabled={isSyncing} className="flex-1 bg-emerald-50 text-emerald-700 border border-emerald-200 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-sm">
                    {isSyncing ? (
                      <div className="w-3 h-3 border-2 border-emerald-600/30 border-t-emerald-600 rounded-full animate-spin"></div>
                    ) : (
                      <>
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                        Đồng bộ từ Sheet (Load)
+                        Đồng bộ từ Sheet
                      </>
                    )}
                </button>

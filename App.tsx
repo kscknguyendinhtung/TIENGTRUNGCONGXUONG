@@ -1,12 +1,12 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { AppTab, USERS, SentenceAnalysis } from './types';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { AppTab, USERS, SentenceAnalysis, Flashcard } from './types';
 import { FlashcardView } from './components/FlashcardView';
 import { ReadingView } from './components/ReadingView';
 import { GrammarView } from './components/GrammarView';
-import { syncToGoogleSheets, fetchFromGoogleSheets } from './services/geminiService';
+import { syncUserSheet, fetchPublicSheetCsv } from './services/geminiService';
 
-const DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzdN-mfGNk1Q4vNekSzxVl7msBzJDaMwhjoQTJpW1b6x7vq-GF3fjWyTgxvFI9phVtrHA/exec";
+const DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxN75HBHoEdyp1WV8Lrh18WyDoWNkBgpwzi2S6Q9BjIC35_BXzWBLFGVKoXzs37CsY3/exec";
 const TONY_SHEET_URL = "https://docs.google.com/spreadsheets/d/1lm5zQSzWfqayTM8nJttDLqwIfmRN7FeOIfT9HthYQqg/edit";
 
 const App: React.FC = () => {
@@ -14,12 +14,26 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<string | null>(localStorage.getItem('current_user'));
   const [showSyncModal, setShowSyncModal] = useState(false);
   
-  // Script URL for API logic
-  const [scriptUrl, setScriptUrl] = useState(localStorage.getItem('global_script_url') || DEFAULT_SCRIPT_URL);
-  // Sheet URL for direct user editing
-  const [sheetUrl, setSheetUrl] = useState(localStorage.getItem('global_sheet_url') || "");
+  const [scriptUrl, setScriptUrl] = useState(() => {
+    const stored = localStorage.getItem('global_script_url');
+    // Force update: Nếu URL trong máy user khác URL mặc định mới, tự động cập nhật lại.
+    if (stored !== DEFAULT_SCRIPT_URL) {
+      localStorage.setItem('global_script_url', DEFAULT_SCRIPT_URL);
+      return DEFAULT_SCRIPT_URL;
+    }
+    return stored || DEFAULT_SCRIPT_URL;
+  });
   
-  const [syncing, setSyncing] = useState(false);
+  const [sheetUrl, setSheetUrl] = useState(() => {
+    const user = localStorage.getItem('current_user');
+    if (user === 'Tony') return TONY_SHEET_URL;
+    return user ? (localStorage.getItem(`sheet_url_${user}`) || "") : "";
+  });
+  
+  // Sync Status: 'idle' | 'pending' (waiting to send) | 'syncing' (sending) | 'error'
+  const [syncState, setSyncState] = useState<'idle' | 'pending' | 'syncing' | 'error'>('idle');
+  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [stats, setStats] = useState({ vocabCount: 0, masteredCount: 0, lessonsCount: 0 });
 
   const loadStats = useCallback((user: string) => {
@@ -28,9 +42,7 @@ const App: React.FC = () => {
     const manualData = JSON.parse(localStorage.getItem(`manual_words_${user}`) || '[]');
     
     const uniqueWords = new Set();
-    readingData.forEach((s: SentenceAnalysis) => {
-      s.words?.forEach(w => uniqueWords.add(w.text));
-    });
+    readingData.forEach((s: SentenceAnalysis) => s.words?.forEach(w => uniqueWords.add(w.text)));
     manualData.forEach((m: any) => uniqueWords.add(m.word));
 
     const masteredCount = Object.values(masteryData).filter(v => v === true).length;
@@ -43,72 +55,127 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    // Đảm bảo URL luôn là URL mới nhất khi khởi động App
+    if (scriptUrl !== DEFAULT_SCRIPT_URL) {
+       setScriptUrl(DEFAULT_SCRIPT_URL);
+       localStorage.setItem('global_script_url', DEFAULT_SCRIPT_URL);
+    }
     if (currentUser) loadStats(currentUser);
-  }, [currentUser, activeTab, loadStats]);
+  }, [currentUser, activeTab, loadStats, scriptUrl]);
 
-  const getHanoiTimestamp = () => {
-    return new Date().toLocaleString("sv-SE", { timeZone: "Asia/Ho_Chi_Minh" });
-  };
-
-  const triggerCloudBackup = useCallback(async (user: string) => {
+  // --- DEBOUNCED SYNC LOGIC ---
+  const triggerCloudBackup = useCallback((user: string) => {
     if (!scriptUrl) return;
-    setSyncing(true);
-    const data = {
-      user: user,
-      reading: JSON.parse(localStorage.getItem(`reading_${user}`) || '[]'),
-      mastery: JSON.parse(localStorage.getItem(`mastery_${user}`) || '{}'),
-      manual_words: JSON.parse(localStorage.getItem(`manual_words_${user}`) || '[]'),
-      timestamp: getHanoiTimestamp()
-    };
-    await syncToGoogleSheets(scriptUrl, data);
-    setSyncing(false);
-    loadStats(user);
+    
+    // 1. Clear previous timer if exists (reset debounce)
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
+    }
+
+    // 2. Set UI to "Pending" (Waiting for user to stop typing/clicking)
+    setSyncState('pending');
+
+    // 3. Set new timer (Execute after 2 seconds of inactivity)
+    syncTimeoutRef.current = setTimeout(async () => {
+      setSyncState('syncing');
+      try {
+        // Collect Data
+        const manualData: Flashcard[] = JSON.parse(localStorage.getItem(`manual_words_${user}`) || '[]');
+        const readingData: SentenceAnalysis[] = JSON.parse(localStorage.getItem(`reading_${user}`) || '[]');
+        const masteryData: Record<string, boolean> = JSON.parse(localStorage.getItem(`mastery_${user}`) || '{}');
+
+        // Merge Data
+        const mergedMap = new Map<string, Flashcard>();
+        manualData.forEach(card => {
+          mergedMap.set(card.word, { ...card, mastered: !!masteryData[card.word] });
+        });
+        readingData.forEach(lesson => {
+          lesson.words.forEach(w => {
+            if (!mergedMap.has(w.text)) {
+              mergedMap.set(w.text, {
+                id: `read-${w.text}`,
+                word: w.text,
+                pinyin: w.pinyin,
+                hanViet: w.hanViet,
+                meaning: w.meaning,
+                category: w.category || 'Bài đọc',
+                mastered: !!masteryData[w.text],
+                isManual: false
+              });
+            } else {
+               const existing = mergedMap.get(w.text)!;
+               mergedMap.set(w.text, { ...existing, mastered: !!masteryData[w.text] });
+            }
+          });
+        });
+
+        const finalCards = Array.from(mergedMap.values());
+        console.log(`Auto-syncing ${finalCards.length} items for ${user} to ${scriptUrl}...`);
+
+        // Send to Sheet
+        await syncUserSheet(scriptUrl, user, finalCards);
+        
+        setSyncState('idle');
+        loadStats(user);
+      } catch (e) {
+        console.error("Sync failed", e);
+        setSyncState('error');
+      }
+    }, 2000); // 2000ms debounce
   }, [scriptUrl, loadStats]);
 
   const triggerCloudRestore = useCallback(async () => {
-    if (!scriptUrl || !currentUser) return;
-    setSyncing(true);
+    if (!sheetUrl || !currentUser) return;
+    setSyncState('syncing');
     try {
-      const cloudData = await fetchFromGoogleSheets(scriptUrl, currentUser);
-      if (cloudData) {
-        if (cloudData.reading) localStorage.setItem(`reading_${currentUser}`, JSON.stringify(cloudData.reading));
-        if (cloudData.mastery) localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(cloudData.mastery));
-        if (cloudData.manual_words) localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(cloudData.manual_words));
-        loadStats(currentUser);
-        // Force a UI refresh by briefly toggling tabs or using a key (simplified here by relying on child components to re-read localStorage on prop change or mount)
-        // We will pass a timestamp prop to children to force re-render
-        alert("Đã cập nhật dữ liệu mới nhất từ Google Sheets!");
+      const cloudData = await fetchPublicSheetCsv(sheetUrl);
+      if (cloudData && cloudData.length > 0) {
+         const restoredCards: Flashcard[] = cloudData.map((d, i) => ({
+             id: `restored-${i}`,
+             word: d.word,
+             pinyin: d.pinyin,
+             hanViet: d.hanViet,
+             meaning: d.meaning,
+             category: d.category,
+             mastered: d.mastered,
+             isManual: true
+         }));
+
+         localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(restoredCards));
+         
+         const newMastery: Record<string, boolean> = {};
+         restoredCards.forEach(c => {
+             if (c.mastered) newMastery[c.word] = true;
+         });
+         localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(newMastery));
+
+         loadStats(currentUser);
+         alert(`Đã tải về ${restoredCards.length} từ vựng mới nhất từ Sheet!`);
       } else {
-        alert("Không tải được dữ liệu. Kiểm tra lại đường truyền hoặc Script URL.");
+        alert("Không tìm thấy dữ liệu trên Sheet.");
       }
+      setSyncState('idle');
     } catch (e) {
       console.error(e);
+      setSyncState('error');
       alert("Lỗi khi tải dữ liệu.");
-    } finally {
-      setSyncing(false);
     }
-  }, [scriptUrl, currentUser, loadStats]);
+  }, [sheetUrl, currentUser, loadStats]);
 
   const selectUser = async (user: string) => {
     setCurrentUser(user);
     localStorage.setItem('current_user', user);
     
-    // Set default sheet URL for Tony
+    let newSheetUrl = "";
     if (user === 'Tony') {
-      setSheetUrl(TONY_SHEET_URL);
-      localStorage.setItem('global_sheet_url', TONY_SHEET_URL);
+      newSheetUrl = TONY_SHEET_URL;
+    } else {
+      newSheetUrl = localStorage.getItem(`sheet_url_${user}`) || "";
     }
+    
+    setSheetUrl(newSheetUrl);
+    localStorage.setItem('global_sheet_url', newSheetUrl);
 
-    setSyncing(true);
-    
-    const cloudData = await fetchFromGoogleSheets(scriptUrl, user);
-    if (cloudData) {
-      if (cloudData.reading) localStorage.setItem(`reading_${user}`, JSON.stringify(cloudData.reading));
-      if (cloudData.mastery) localStorage.setItem(`mastery_${user}`, JSON.stringify(cloudData.mastery));
-      if (cloudData.manual_words) localStorage.setItem(`manual_words_${user}`, JSON.stringify(cloudData.manual_words));
-    }
-    
-    setSyncing(false);
     loadStats(user);
     setActiveTab(AppTab.HOME);
   };
@@ -152,8 +219,6 @@ const App: React.FC = () => {
   }
 
   const renderContent = () => {
-    // We pass key={stats.vocabCount} (or similar) to force re-render when data changes significantly, 
-    // or rely on the views to handle updates via onDataChange.
     switch (activeTab) {
       case AppTab.VOCABULARY: 
         return <FlashcardView 
@@ -161,6 +226,7 @@ const App: React.FC = () => {
           onDataChange={() => triggerCloudBackup(currentUser!)}
           sheetUrl={sheetUrl}
           onPull={triggerCloudRestore}
+          scriptUrl={scriptUrl} // Pass scriptUrl as prop ensures consistency
         />;
       case AppTab.READING: return <ReadingView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} />;
       case AppTab.GRAMMAR: return <GrammarView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} />;
@@ -182,7 +248,7 @@ const App: React.FC = () => {
               </div>
               <div className="flex gap-2">
                 <button onClick={() => setShowSyncModal(true)} className="w-10 h-10 bg-white border border-slate-100 rounded-xl shadow-sm flex items-center justify-center text-slate-400 active:scale-90 transition-transform">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                 </button>
                 <button onClick={logout} className="w-10 h-10 bg-rose-50 border border-rose-100 rounded-xl shadow-sm flex items-center justify-center text-rose-400 active:scale-90 transition-transform">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
@@ -207,21 +273,30 @@ const App: React.FC = () => {
                <div className="absolute -top-16 -right-16 w-48 h-48 bg-blue-600/20 rounded-full blur-[60px]"></div>
               <div className="relative z-10">
                 <div className="flex items-center gap-2.5 mb-3">
-                   <div className={`w-2 h-2 rounded-full ${syncing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`}></div>
-                   <h3 className="text-[8px] font-black uppercase tracking-[0.3em] opacity-60">Cloud: {syncing ? 'Syncing...' : 'Ready'}</h3>
+                   {/* Sync Indicator Logic */}
+                   <div className={`w-2 h-2 rounded-full transition-colors duration-500 ${
+                       syncState === 'syncing' ? 'bg-amber-400 animate-pulse' : 
+                       syncState === 'pending' ? 'bg-blue-400' :
+                       syncState === 'error' ? 'bg-rose-500' : 'bg-emerald-400'
+                   }`}></div>
+                   <h3 className="text-[8px] font-black uppercase tracking-[0.3em] opacity-60">
+                       {syncState === 'syncing' ? 'ĐANG LƯU...' : 
+                        syncState === 'pending' ? 'CHỜ LƯU...' : 
+                        syncState === 'error' ? 'LỖI LƯU' : 'ĐÃ ĐỒNG BỘ'}
+                   </h3>
                 </div>
-                <p className="text-xl font-black leading-tight mb-6 max-w-[200px]">Đồng bộ dữ liệu học tập lên Google Cloud.</p>
+                <p className="text-xl font-black leading-tight mb-6 max-w-[200px]">Dữ liệu được tự động lưu lên Sheet sau 2s.</p>
                 <button 
                   onClick={() => triggerCloudBackup(currentUser!)} 
-                  disabled={syncing}
+                  disabled={syncState === 'syncing'}
                   className="bg-white text-slate-900 px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 disabled:opacity-50"
                 >
-                  {syncing ? (
+                  {syncState === 'syncing' ? (
                     <div className="w-3 h-3 border-2 border-slate-900/30 border-t-slate-900 rounded-full animate-spin"></div>
                   ) : (
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
                   )}
-                  LƯU DỮ LIỆU
+                  LƯU NGAY
                 </button>
               </div>
             </div>
@@ -259,6 +334,16 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-slate-50 max-w-lg mx-auto shadow-2xl flex flex-col relative font-sans">
       <main className="flex-grow">{renderContent()}</main>
       
+      {/* Persistent Sync Status Indicator (Small) */}
+      {activeTab !== AppTab.USER_SELECT && syncState !== 'idle' && (
+         <div className="fixed top-4 right-4 z-[60] flex items-center gap-2 bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-full shadow-lg">
+             <div className={`w-1.5 h-1.5 rounded-full ${syncState === 'syncing' ? 'bg-amber-400 animate-pulse' : 'bg-blue-400'}`}></div>
+             <span className="text-[7px] font-black text-white uppercase tracking-widest">
+                {syncState === 'syncing' ? 'Đang lưu...' : 'Chờ lưu...'}
+             </span>
+         </div>
+      )}
+      
       {showSyncModal && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl flex items-center justify-center p-6 z-[100]">
           <div className="bg-white w-full max-w-sm p-8 rounded-[40px] shadow-2xl">
@@ -286,9 +371,13 @@ const App: React.FC = () => {
                   onChange={(e) => {
                     setSheetUrl(e.target.value);
                     localStorage.setItem('global_sheet_url', e.target.value);
+                    if (currentUser) {
+                        localStorage.setItem(`sheet_url_${currentUser}`, e.target.value);
+                    }
                   }}
-                  placeholder="https://docs.google.com/spreadsheets/d/..."
-                  className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs focus:border-blue-500 shadow-inner"
+                  placeholder={currentUser === 'Tony' ? "Mặc định (Tony)" : "https://docs.google.com/spreadsheets/d/..."}
+                  disabled={currentUser === 'Tony'}
+                  className={`w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs focus:border-blue-500 shadow-inner ${currentUser === 'Tony' ? 'opacity-60 cursor-not-allowed' : ''}`}
                 />
               </div>
             </div>
