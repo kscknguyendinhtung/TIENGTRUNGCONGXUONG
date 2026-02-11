@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Flashcard, SentenceAnalysis, MindmapCategory } from '../types';
-import { speakText, extractVocabulary, fetchPublicSheetCsv, syncVocabData } from '../services/geminiService';
+import { speakText, extractVocabulary, fetchPublicSheetCsv, syncVocabData, toggleBackgroundMode } from '../services/geminiService';
 import { MindmapView } from './MindmapView';
 
 interface FlashcardViewProps { 
@@ -23,6 +23,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
   const [topicFilter, setTopicFilter] = useState<string>('all');
   
   const [isAutoPlay, setIsAutoPlay] = useState(false);
+  const [isBackgroundAudio, setIsBackgroundAudio] = useState(false); // New State
   const [isAutoSpeak, setIsAutoSpeak] = useState(true);
   const [autoInterval, setAutoInterval] = useState(4); 
   const [playbackSpeed, setPlaybackSpeed] = useState(1.1);
@@ -61,6 +62,13 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     };
     runAutoSync();
   }, [currentUser, sheetUrl]);
+
+  // Handle Background Audio Toggle
+  const handleToggleBackground = () => {
+    const newState = !isBackgroundAudio;
+    setIsBackgroundAudio(newState);
+    toggleBackgroundMode(newState);
+  };
 
   const loadCards = () => {
     const mindmapDataRaw = localStorage.getItem(`mindmap_${currentUser}`);
@@ -568,6 +576,13 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
                 <span className="text-[8px] font-bold text-slate-400 uppercase w-16">Chờ:</span>
                 <input type="range" min="2" max="10" step="1" value={autoInterval} onChange={(e) => setAutoInterval(parseInt(e.target.value))} className="flex-1 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"/>
                 <span className="text-[9px] font-black w-6 text-right">{autoInterval}s</span>
+             </div>
+
+             <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+                <span className="text-[8px] font-bold text-slate-400 uppercase">Chạy ngầm (iOS):</span>
+                <button onClick={handleToggleBackground} className={`px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${isBackgroundAudio ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-500'}`}>
+                   {isBackgroundAudio ? 'ĐANG BẬT' : 'ĐÃ TẮT'}
+                </button>
              </div>
           </div>
         )}

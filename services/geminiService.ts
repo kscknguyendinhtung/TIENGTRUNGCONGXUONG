@@ -4,6 +4,41 @@ import { SentenceAnalysis, MindmapCategory, Flashcard } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
 
+// --- BACKGROUND AUDIO HACK FOR IOS ---
+// A tiny silent MP3 file in base64 to keep the Audio Session active
+const SILENT_AUDIO_BASE64 = "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//oeAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//////////////////////////////////////////////////////////////////wAAAD9MYXZjNTguMTM0AAAAAAAAAAAAAAAAJAAAAAAAAAAAASAAAAAAAASQAAAAJlAAAA8AAAAA//oeZAAAAABiAAAAAAAAAAARAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAA//oeZAAAAABiAAAAAAAAAAARAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAA//oeZAAAAABiAAAAAAAAAAARAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAA//oeZAAAAABiAAAAAAAAAAARAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAA//oeZAAAAABiAAAAAAAAAAARAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAA";
+
+let backgroundAudio: HTMLAudioElement | null = null;
+
+export const toggleBackgroundMode = (enable: boolean) => {
+  if (enable) {
+    if (!backgroundAudio) {
+      backgroundAudio = new Audio(SILENT_AUDIO_BASE64);
+      backgroundAudio.loop = true;
+      backgroundAudio.volume = 0.01; // Non-zero volume is important for iOS
+    }
+    backgroundAudio.play().catch(e => console.log("Bg Audio play failed", e));
+    
+    // Media Session API to show controls on Lock Screen (Optional but helpful)
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'Zhongwen Master',
+        artist: 'Đang chạy ngầm...',
+        album: 'Luyện nghe thụ động',
+        artwork: [{ src: 'https://via.placeholder.com/512', sizes: '512x512', type: 'image/png' }]
+      });
+      navigator.mediaSession.setActionHandler('play', () => backgroundAudio?.play());
+      navigator.mediaSession.setActionHandler('pause', () => backgroundAudio?.pause());
+    }
+  } else {
+    if (backgroundAudio) {
+      backgroundAudio.pause();
+      backgroundAudio = null;
+    }
+  }
+};
+// -------------------------------------
+
 // Helper to clean JSON string from Markdown code blocks
 const cleanJsonString = (text: string): string => {
   if (!text) return "[]";
@@ -86,12 +121,21 @@ export const syncVocabData = async (scriptUrl: string, user: string, cards: Flas
 export const fetchFromScript = async (scriptUrl: string, user: string) => {
   if (!scriptUrl || !scriptUrl.startsWith("http")) return null;
   try {
-    const url = `${scriptUrl}?user=${encodeURIComponent(user)}&action=get`;
-    const response = await fetch(url);
+    // Add timestamp to avoid caching
+    const url = `${scriptUrl}?user=${encodeURIComponent(user)}&action=get&_t=${Date.now()}`;
+    const response = await fetch(url, {
+        method: 'GET',
+        credentials: 'omit', // Fixes CORS issues with multiple Google accounts
+    });
+    
     if (!response.ok) return null;
-    return await response.json();
+    const text = await response.text();
+    // HTML returned means error page from Google
+    if (text.trim().startsWith("<")) return null; 
+    
+    return JSON.parse(text);
   } catch (e) {
-    console.error(`Fetch Error for ${scriptUrl}`, e);
+    console.warn(`Fetch Error for ${scriptUrl}`, e);
     return null;
   }
 };
@@ -260,11 +304,17 @@ export const generateMindmap = async (words: {text: string, pinyin: string, mean
   } catch (e) { return []; }
 };
 
+// Global reference to prevent GC
+const activeUtterances: SpeechSynthesisUtterance[] = [];
+
 export const speakText = (text: string, lang: 'cn' | 'vn', speed: number = 1.0) => {
   if (!('speechSynthesis' in window)) return;
   const synth = window.speechSynthesis;
+  
   if (synth.paused) synth.resume();
-  synth.cancel();
+  
+  // Do NOT cancel here if we want to queue sentences or if in background mode
+  // synth.cancel(); 
 
   const utterance = new SpeechSynthesisUtterance(text.trim());
   utterance.rate = speed;
@@ -289,8 +339,17 @@ export const speakText = (text: string, lang: 'cn' | 'vn', speed: number = 1.0) 
     }
     if (selectedVoice) utterance.voice = selectedVoice;
   }
+
+  // Anti-GC trick: keep reference
+  activeUtterances.push(utterance);
+  utterance.onend = () => {
+    const index = activeUtterances.indexOf(utterance);
+    if (index > -1) activeUtterances.splice(index, 1);
+  };
+
   synth.speak(utterance);
 };
+
 // Remove old functions to avoid confusion
 export const syncToGoogleSheets = async (scriptUrl: string, data: any) => { return false; };
 export const syncUserSheet = async (scriptUrl: string, user: string, cards: any[], reading: any[]) => { return false; };

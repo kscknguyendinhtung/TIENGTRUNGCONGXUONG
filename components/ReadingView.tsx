@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { analyzeImageAndExtractText, speakText } from '../services/geminiService';
+import { analyzeImageAndExtractText, speakText, toggleBackgroundMode } from '../services/geminiService';
 import { SentenceAnalysis } from '../types';
 
 interface ReadingViewProps { 
@@ -14,6 +14,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
   const [selectedWord, setSelectedWord] = useState<any>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState(0.8);
   const [showMastered, setShowMastered] = useState(false);
+  const [isBackgroundAudio, setIsBackgroundAudio] = useState(false); // New State
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -39,6 +40,12 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
     localStorage.setItem(`reading_${currentUser}`, JSON.stringify(data));
     setSentences([...data]); // Force re-render with fresh array copy
     if (onDataChange) onDataChange();
+  };
+
+  const handleToggleBackground = () => {
+    const newState = !isBackgroundAudio;
+    setIsBackgroundAudio(newState);
+    toggleBackgroundMode(newState);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -113,6 +120,13 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
           </div>
         </div>
         <input type="range" min="0.5" max="2.0" step="0.1" value={playbackSpeed} onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))} className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"/>
+        
+        <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+            <span className="text-[8px] font-bold text-slate-400 uppercase">Chạy ngầm (iOS):</span>
+            <button onClick={handleToggleBackground} className={`px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${isBackgroundAudio ? 'bg-indigo-500 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                {isBackgroundAudio ? 'ĐANG BẬT' : 'ĐÃ TẮT'}
+            </button>
+        </div>
       </div>
 
       <div className="flex gap-2 mb-8 bg-slate-100 p-1 rounded-2xl">
