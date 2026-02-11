@@ -15,6 +15,75 @@ const cleanJsonString = (text: string): string => {
   return clean;
 };
 
+// Helper: Robust CSV Parser
+const parseCSV = (str: string) => {
+  const arr: string[][] = [];
+  let quote = false;
+  let col = 0, row = 0;
+
+  for (let c = 0; c < str.length; c++) {
+    const cc = str[c], nc = str[c + 1];
+    arr[row] = arr[row] || [];
+    arr[row][col] = arr[row][col] || '';
+
+    if (cc == '"' && quote && nc == '"') { arr[row][col] += cc; ++c; continue; }
+    if (cc == '"') { quote = !quote; continue; }
+    if (cc == ',' && !quote) { ++col; continue; }
+    if (cc == '\r' && nc == '\n' && !quote) { ++row; col = 0; ++c; continue; }
+    if (cc == '\n' && !quote) { ++row; col = 0; continue; }
+    if (cc == '\r' && !quote) { ++row; col = 0; continue; }
+
+    arr[row][col] += cc;
+  }
+  return arr;
+};
+
+// Fetch data from Public Google Sheet (CSV format via GVIZ API)
+export const fetchPublicSheetCsv = async (sheetUrl: string): Promise<any[]> => {
+  try {
+    // 1. Extract Sheet ID
+    const match = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    if (!match) throw new Error("URL Sheet không hợp lệ");
+    const sheetId = match[1];
+
+    // 2. Construct CSV Export URL (Google Visualization API)
+    // tqx=out:csv -> output as CSV
+    // sheet=Sheet1 -> optional, defaults to first sheet
+    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+
+    const response = await fetch(csvUrl);
+    if (!response.ok) throw new Error("Không thể truy cập Sheet. Hãy đảm bảo Sheet đang để chế độ 'Anyone with the link can view'.");
+    
+    const text = await response.text();
+    const rows = parseCSV(text);
+
+    // 3. Convert CSV rows to Objects
+    // Assume format: [Word, Pinyin, HanViet, Meaning, Category, Status]
+    // Filter header if present
+    const data = [];
+    const startRow = (rows[0][0].includes("Hán tự") || rows[0][0].includes("Word")) ? 1 : 0;
+
+    for (let i = startRow; i < rows.length; i++) {
+      const col = rows[i];
+      if (col.length >= 4 && col[0]) {
+        data.push({
+          word: col[0],
+          pinyin: col[1],
+          hanViet: col[2],
+          meaning: col[3],
+          category: col[4] || 'Khác',
+          mastered: (col[5] && (col[5].toLowerCase() === 'true' || col[5] === '1')) || false
+        });
+      }
+    }
+    return data;
+
+  } catch (e) {
+    console.error("CSV Fetch Error:", e);
+    return [];
+  }
+};
+
 // Helper to extract words from either text or image
 export const extractVocabulary = async (input: { text?: string, imageBase64?: string }): Promise<any[]> => {
   const parts: any[] = [];

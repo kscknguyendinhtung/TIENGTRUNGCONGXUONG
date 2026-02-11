@@ -7,6 +7,7 @@ import { GrammarView } from './components/GrammarView';
 import { syncToGoogleSheets, fetchFromGoogleSheets } from './services/geminiService';
 
 const DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzdN-mfGNk1Q4vNekSzxVl7msBzJDaMwhjoQTJpW1b6x7vq-GF3fjWyTgxvFI9phVtrHA/exec";
+const TONY_SHEET_URL = "https://docs.google.com/spreadsheets/d/1lm5zQSzWfqayTM8nJttDLqwIfmRN7FeOIfT9HthYQqg/edit";
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>(AppTab.USER_SELECT);
@@ -91,6 +92,13 @@ const App: React.FC = () => {
   const selectUser = async (user: string) => {
     setCurrentUser(user);
     localStorage.setItem('current_user', user);
+    
+    // Set default sheet URL for Tony
+    if (user === 'Tony') {
+      setSheetUrl(TONY_SHEET_URL);
+      localStorage.setItem('global_sheet_url', TONY_SHEET_URL);
+    }
+
     setSyncing(true);
     
     const cloudData = await fetchFromGoogleSheets(scriptUrl, user);

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Flashcard, SentenceAnalysis, MindmapCategory } from '../types';
-import { speakText, extractVocabulary } from '../services/geminiService';
+import { speakText, extractVocabulary, fetchPublicSheetCsv } from '../services/geminiService';
 import { MindmapView } from './MindmapView';
 
 interface FlashcardViewProps { 
@@ -38,6 +38,13 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
   // Bulk select states
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedWords, setSelectedWords] = useState<Set<string>>(new Set());
+
+  // Import Modal State
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importText, setImportText] = useState('');
+
+  // Auto Sync State
+  const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
     loadCards();
@@ -338,11 +345,141 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     });
   };
 
-  if (cards.length === 0 && !showAddModal) return (
+  const handleAutoSync = async () => {
+    if (!sheetUrl) return alert("Vui lòng cấu hình URL Google Sheets trước (vào Home > Cài đặt).");
+    
+    setIsSyncing(true);
+    try {
+      const newData = await fetchPublicSheetCsv(sheetUrl);
+      if (newData.length === 0) {
+        alert("Không tải được dữ liệu.\n\nLƯU Ý QUAN TRỌNG:\nBạn phải đặt quyền chia sẻ Google Sheet là:\n'Anyone with the link can view' (Bất kỳ ai có liên kết đều có thể xem).");
+        return;
+      }
+      
+      const newCards: Flashcard[] = newData.map((d, i) => ({
+        id: `auto-${Date.now()}-${i}`,
+        word: d.word,
+        pinyin: d.pinyin,
+        hanViet: d.hanViet,
+        meaning: d.meaning,
+        category: d.category,
+        isManual: true,
+        mastered: d.mastered
+      }));
+      
+      // Update LocalStorage
+      // Merge logic: Overwrite existing manually
+      const raw = localStorage.getItem(`manual_words_${currentUser}`);
+      let manual: Flashcard[] = raw ? JSON.parse(raw) : [];
+      const existingWords = new Set(newCards.map(c => c.word));
+      const filteredManual = manual.filter(m => !existingWords.has(m.word));
+      const updatedManual = [...filteredManual, ...newCards];
+      
+      localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
+      
+      // Update Mastery
+      const currentMastery = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
+      newCards.forEach(c => {
+        if (c.mastered) currentMastery[c.word] = true;
+        // Optional: if false in sheet, should we set false in app? 
+        // For now, let's respect the sheet status if it's explicitly TRUE.
+      });
+      localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(currentMastery));
+
+      alert(`Đồng bộ thành công! Đã cập nhật ${newCards.length} từ vựng từ Sheet.`);
+      loadCards();
+      if (onDataChange) onDataChange();
+      
+    } catch (e) {
+      console.error(e);
+      alert("Lỗi đồng bộ.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleProcessImport = () => {
+    if (!importText.trim()) return;
+
+    try {
+      const rows = importText.trim().split('\n');
+      const newCards: Flashcard[] = [];
+      const masteryUpdates: Record<string, boolean> = {};
+
+      // Bỏ qua dòng header nếu có
+      const startIdx = (rows[0].includes("Hán tự") || rows[0].includes("Pinyin")) ? 1 : 0;
+
+      for (let i = startIdx; i < rows.length; i++) {
+        const cols = rows[i].split('\t');
+        if (cols.length >= 4) {
+          const word = cols[0].trim();
+          const pinyin = cols[1].trim();
+          const hanViet = cols[2].trim();
+          const meaning = cols[3].trim();
+          const category = cols[4] ? cols[4].trim() : 'Khác';
+          const masteredStr = cols[5] ? cols[5].trim().toUpperCase() : 'FALSE';
+          const mastered = masteredStr === 'TRUE' || masteredStr === 'YES' || masteredStr === '1';
+
+          if (word) {
+            newCards.push({
+              id: `imported-${Date.now()}-${i}`,
+              word,
+              pinyin,
+              hanViet,
+              meaning,
+              category,
+              isManual: true,
+              mastered
+            });
+            if (mastered) masteryUpdates[word] = true;
+          }
+        }
+      }
+
+      if (newCards.length > 0) {
+        // Cập nhật Local Storage
+        const raw = localStorage.getItem(`manual_words_${currentUser}`);
+        let manual: Flashcard[] = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(manual)) manual = [];
+
+        // Hợp nhất: Xóa từ cũ trùng tên, thêm từ mới
+        const existingWords = new Set(newCards.map(c => c.word));
+        const filteredManual = manual.filter(m => !existingWords.has(m.word));
+        const updatedManual = [...filteredManual, ...newCards];
+        
+        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
+
+        // Cập nhật Mastery
+        const currentMastery = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
+        const updatedMastery = { ...currentMastery, ...masteryUpdates };
+        localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(updatedMastery));
+
+        alert(`Đã nhập thành công ${newCards.length} từ!`);
+        setShowImportModal(false);
+        setImportText('');
+        loadCards();
+        if (onDataChange) onDataChange();
+      } else {
+        alert("Không nhận diện được dữ liệu. Hãy đảm bảo bạn đã copy từ Sheet/Excel đúng định dạng (có các cột).");
+      }
+
+    } catch (e) {
+      console.error(e);
+      alert("Lỗi khi xử lý dữ liệu nhập.");
+    }
+  };
+
+  if (cards.length === 0 && !showAddModal && !showImportModal) return (
     <div className="py-20 px-6 text-center flex flex-col items-center">
       <div className="text-6xl mb-6 opacity-20">🗂️</div>
       <h3 className="text-lg font-black text-slate-300 uppercase tracking-widest">Chưa có từ vựng</h3>
-      <button onClick={() => setShowAddModal(true)} className="mt-6 bg-rose-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest shadow-lg active:scale-95 uppercase">Thêm từ đầu tiên</button>
+      <div className="flex flex-col gap-3 mt-6">
+        <button onClick={() => setShowAddModal(true)} className="bg-rose-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest shadow-lg active:scale-95 uppercase">Thêm từ đầu tiên</button>
+        <button onClick={() => setShowImportModal(true)} className="bg-blue-50 text-blue-600 px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest shadow-sm active:scale-95 uppercase">Nhập từ Excel/Sheet</button>
+        <button onClick={handleAutoSync} disabled={isSyncing} className="bg-emerald-50 text-emerald-600 px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest shadow-sm active:scale-95 uppercase flex items-center justify-center gap-2">
+           {isSyncing ? <div className="w-3 h-3 border-2 border-emerald-600/30 border-t-emerald-600 rounded-full animate-spin"></div> : 'Đồng bộ từ Sheet'}
+        </button>
+      </div>
     </div>
   );
 
@@ -485,17 +622,25 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
              <div className="flex gap-2">
                <button onClick={handleCopyForSheet} className="flex-1 bg-amber-50 text-amber-700 border border-amber-200 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-sm">
                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
-                 Copy dữ liệu (vào Sheet)
+                 Copy dữ liệu
                </button>
-               {onPull && (
-                 <button onClick={onPull} className="flex-1 bg-blue-50 text-blue-700 border border-blue-200 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2">
-                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                   Cập nhật từ Sheet
-                 </button>
-               )}
+               <button onClick={handleAutoSync} disabled={isSyncing} className="flex-1 bg-emerald-50 text-emerald-700 border border-emerald-200 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-sm">
+                   {isSyncing ? (
+                     <div className="w-3 h-3 border-2 border-emerald-600/30 border-t-emerald-600 rounded-full animate-spin"></div>
+                   ) : (
+                     <>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                        Đồng bộ Auto
+                     </>
+                   )}
+               </button>
                <button onClick={openGoogleSheet} className="w-12 bg-green-50 text-green-700 border border-green-200 rounded-xl flex items-center justify-center active:scale-90 transition-all">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                </button>
+             </div>
+             
+             <div className="flex justify-end mb-1">
+                <button onClick={() => setShowImportModal(true)} className="text-[8px] font-black text-blue-500 uppercase tracking-widest hover:underline">Hoặc nhập thủ công (Paste)</button>
              </div>
 
              <div className="flex justify-between items-center px-1">
@@ -605,6 +750,29 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
                  {isProcessing && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>}
                  {isProcessing ? 'Đang phân tích...' : 'Thêm ngay'}
                </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showImportModal && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl flex items-center justify-center p-6 z-[160]">
+          <div className="bg-white w-full max-w-sm p-8 rounded-[40px] shadow-2xl">
+            <h2 className="text-xl font-black mb-1 text-slate-900 tracking-tighter uppercase">Nhập từ Excel/Sheet</h2>
+            <p className="text-slate-400 text-[10px] font-bold mb-6 uppercase tracking-wider">
+               Copy các dòng từ Sheet (bao gồm cột Hán tự, Pinyin...) rồi dán vào đây.
+            </p>
+            
+            <textarea 
+               value={importText}
+               onChange={(e) => setImportText(e.target.value)}
+               placeholder="Dán dữ liệu tại đây..."
+               className="w-full h-40 px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs text-slate-700 resize-none focus:border-blue-500 transition-colors mb-6"
+            />
+
+            <div className="flex gap-3">
+               <button onClick={() => setShowImportModal(false)} className="flex-1 py-4 bg-slate-100 text-slate-400 rounded-2xl font-black text-[10px] tracking-widest uppercase active:scale-95 transition-transform">Hủy</button>
+               <button onClick={handleProcessImport} disabled={!importText.trim()} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-[10px] tracking-widest shadow-lg uppercase active:scale-95 transition-transform">Xử lý Nhập</button>
             </div>
           </div>
         </div>
