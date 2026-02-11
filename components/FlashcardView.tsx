@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Flashcard, SentenceAnalysis, MindmapCategory } from '../types';
-import { speakText, extractVocabulary, fetchPublicSheetCsv } from '../services/geminiService';
+import { speakText, extractVocabulary, fetchPublicSheetCsv, syncUserSheet } from '../services/geminiService';
 import { MindmapView } from './MindmapView';
 
 interface FlashcardViewProps { 
@@ -46,12 +46,14 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
   // Auto Sync State
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // Script URL for write operations
+  const scriptUrl = localStorage.getItem('global_script_url') || "";
+
   useEffect(() => {
     loadCards();
-  }, [currentUser, onPull]); // Reload if onPull triggers upstream changes
+  }, [currentUser, onPull]);
 
   const loadCards = () => {
-    // Load Mindmap categories mapping first
     const mindmapDataRaw = localStorage.getItem(`mindmap_${currentUser}`);
     const wordCategoryMap: Record<string, string> = {};
     if (mindmapDataRaw) {
@@ -59,7 +61,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         const parsed: MindmapCategory[] = JSON.parse(mindmapDataRaw);
         parsed.forEach(cat => {
           cat.words.forEach(w => {
-            // Prioritize the first category found for a word
             if (!wordCategoryMap[w.text]) {
                 wordCategoryMap[w.text] = cat.name;
             }
@@ -171,41 +172,22 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [isAutoPlay, autoInterval, displayCards.length, viewMode]);
 
-  // Handle toggling selection mode
-  const toggleSelectionMode = () => {
-    setIsSelectionMode(!isSelectionMode);
-    setSelectedWords(new Set()); // Reset selection when toggling
-    setViewMode('list'); // Force list view
+  const getManualWords = (): Flashcard[] => {
+    const raw = localStorage.getItem(`manual_words_${currentUser}`);
+    return raw ? JSON.parse(raw) : [];
   };
 
-  const handleSelectWord = (word: string) => {
-    setSelectedWords(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(word)) newSet.delete(word);
-      else newSet.add(word);
-      return newSet;
-    });
-  };
+  // --- DELETE & SYNC LOGIC ---
 
-  const handleSelectAll = () => {
-    if (selectedWords.size === displayCards.length) {
-      setSelectedWords(new Set());
-    } else {
-      setSelectedWords(new Set(displayCards.map(c => c.word)));
-    }
-  };
-
-  const deleteSelectedWords = () => {
+  const deleteSelectedWords = async () => {
     if (selectedWords.size === 0) return;
-    if (!confirm(`Bạn có chắc chắn muốn xóa ${selectedWords.size} từ đã chọn?`)) return;
+    if (!confirm(`Xóa ${selectedWords.size} từ? Dữ liệu trên Sheet cũng sẽ được cập nhật (nếu đã cấu hình Apps Script).`)) return;
 
+    let updatedManual: Flashcard[] = [];
     try {
-      const raw = localStorage.getItem(`manual_words_${currentUser}`);
-      const manual: Flashcard[] = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(manual)) {
-        const updatedManual = manual.filter((w: Flashcard) => !selectedWords.has(w.word));
-        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
-      }
+      const manual = getManualWords();
+      updatedManual = manual.filter((w: Flashcard) => !selectedWords.has(w.word));
+      localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
     } catch(e) { console.error("Error bulk deleting words", e); }
 
     const masteryMap = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
@@ -215,28 +197,24 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     setSelectedWords(new Set());
     setIsSelectionMode(false);
     loadCards();
+    
+    if (scriptUrl) {
+      setIsSyncing(true);
+      await syncUserSheet(scriptUrl, currentUser, updatedManual);
+      setIsSyncing(false);
+    }
+    
     if (onDataChange) onDataChange();
   };
 
-  const toggleMastery = (card: Flashcard) => {
-    const masteryMap = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
-    masteryMap[card.word] = !card.mastered;
-    localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(masteryMap));
+  const deleteWord = async (word: string) => {
+    if (!confirm(`Xóa từ "${word}"? Sẽ cập nhật lại Sheet.`)) return;
     
-    setCards(prev => prev.map(c => c.word === card.word ? { ...c, mastered: !c.mastered } : c));
-    if (onDataChange) onDataChange();
-  };
-
-  const deleteWord = (word: string) => {
-    if (!confirm(`Xóa từ "${word}" khỏi danh sách học?`)) return;
-    
+    let updatedManual: Flashcard[] = [];
     try {
-      const raw = localStorage.getItem(`manual_words_${currentUser}`);
-      const manual: Flashcard[] = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(manual)) {
-        const updatedManual = manual.filter((w: Flashcard) => w.word !== word);
-        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
-      }
+      const manual = getManualWords();
+      updatedManual = manual.filter((w: Flashcard) => w.word !== word);
+      localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
     } catch(e) { console.error("Error deleting word", e); }
 
     const masteryMap = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
@@ -244,7 +222,55 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(masteryMap));
     
     loadCards();
+
+    if (scriptUrl) {
+      setIsSyncing(true);
+      await syncUserSheet(scriptUrl, currentUser, updatedManual);
+      setIsSyncing(false);
+    }
+
     if (onDataChange) onDataChange();
+  };
+
+  // -------------------------
+
+  const toggleMastery = async (card: Flashcard) => {
+    const masteryMap = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
+    const newState = !card.mastered;
+    masteryMap[card.word] = newState;
+    localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(masteryMap));
+    
+    setCards(prev => prev.map(c => c.word === card.word ? { ...c, mastered: newState } : c));
+    
+    const manual = getManualWords();
+    const updatedManual = manual.map(m => m.word === card.word ? { ...m, mastered: newState } : m);
+    localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
+
+    if (onDataChange) onDataChange();
+  };
+
+  const toggleSelectionMode = () => {
+    setIsSelectionMode(prev => !prev);
+    setSelectedWords(new Set());
+  };
+
+  const handleSelectWord = (word: string) => {
+    const newSelected = new Set(selectedWords);
+    if (newSelected.has(word)) {
+      newSelected.delete(word);
+    } else {
+      newSelected.add(word);
+    }
+    setSelectedWords(newSelected);
+  };
+
+  const handleSelectAll = () => {
+    if (selectedWords.size === displayCards.length) {
+      setSelectedWords(new Set());
+    } else {
+      const allWords = new Set(displayCards.map(c => c.word));
+      setSelectedWords(allWords);
+    }
   };
 
   const handleProcessAdd = async () => {
@@ -268,16 +294,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
       }
 
       if (newWordsRaw.length > 0) {
-        let manual: Flashcard[] = [];
-        try {
-           const raw = localStorage.getItem(`manual_words_${currentUser}`);
-           manual = raw ? JSON.parse(raw) : [];
-           if (!Array.isArray(manual)) manual = [];
-        } catch (e) {
-           console.error("Manual words corrupt, resetting.", e);
-           manual = [];
-        }
-
+        let manual = getManualWords();
         const formattedWords: Flashcard[] = newWordsRaw.map((w, idx) => ({
           id: `manual-${Date.now()}-${idx}`,
           word: w.text,
@@ -295,6 +312,11 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         setInputText('');
         setShowAddModal(false);
         loadCards();
+        
+        if (scriptUrl) {
+          await syncUserSheet(scriptUrl, currentUser, updatedList);
+        }
+
         if (onDataChange) onDataChange();
       } else {
         alert("Không tìm thấy từ vựng nào!");
@@ -305,6 +327,51 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     } finally {
       setIsProcessing(false);
     }
+  };
+  
+  const handleProcessImport = async () => {
+    if (!importText.trim()) return;
+    setIsProcessing(true);
+    try {
+      const lines = importText.split('\n').filter(l => l.trim());
+      const newCards: Flashcard[] = [];
+      lines.forEach((line, idx) => {
+        const parts = line.split('\t');
+        const word = parts[0]?.trim();
+        if (!word) return;
+        newCards.push({
+            id: `import-${Date.now()}-${idx}`,
+            word: word,
+            pinyin: parts[1]?.trim() || '',
+            hanViet: parts[2]?.trim() || '',
+            meaning: parts[3]?.trim() || '',
+            category: parts[4]?.trim() || 'Khác',
+            mastered: false,
+            isManual: true
+        });
+      });
+
+      if (newCards.length > 0) {
+        const manual = getManualWords();
+        const existingWords = new Set(manual.map(m => m.word));
+        const toAdd = newCards.filter(c => !existingWords.has(c.word));
+        const updatedList = [...manual, ...toAdd];
+        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedList));
+        setImportText('');
+        setShowImportModal(false);
+        loadCards();
+        
+        if (scriptUrl) {
+          await syncUserSheet(scriptUrl, currentUser, updatedList);
+        }
+
+        if (onDataChange) onDataChange();
+        alert(`Đã nhập ${toAdd.length} từ mới.`);
+      } else {
+        alert("Không có dữ liệu hợp lệ.");
+      }
+    } catch(e) { console.error(e); alert("Lỗi nhập liệu."); }
+    finally { setIsProcessing(false); }
   };
 
   const handleCardSelect = (index: number) => {
@@ -318,41 +385,16 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     }
   };
 
-  const openGoogleSheet = () => {
-    if (sheetUrl) window.open(sheetUrl, '_blank');
-    else alert("Vui lòng cấu hình URL Google Sheets trong phần Cài đặt (nút Home).");
-  };
-
-  // Logic copy dữ liệu để dán vào Sheet
-  const handleCopyForSheet = () => {
-    if (displayCards.length === 0) return alert("Danh sách trống!");
-    
-    // Tạo header cho Sheet
-    const headers = "Hán tự\tPinyin\tHán Việt\tNghĩa\tPhân loại\tTrạng thái (TRUE=Thuộc)";
-    
-    // Tạo các dòng dữ liệu, ngăn cách bằng Tab (\t) để Excel/Sheet hiểu cột
-    const rows = displayCards.map(c => {
-      const cleanMeaning = c.meaning.replace(/(\r\n|\n|\r)/gm, " "); // Xóa xuống dòng trong nghĩa
-      return `${c.word}\t${c.pinyin}\t${c.hanViet}\t${cleanMeaning}\t${c.category || ''}\t${c.mastered ? 'TRUE' : 'FALSE'}`;
-    }).join('\n');
-
-    const fullText = `${headers}\n${rows}`;
-    
-    navigator.clipboard.writeText(fullText).then(() => {
-        alert("Đã COPY toàn bộ dữ liệu!\n\nBây giờ hãy mở Google Sheet mới và nhấn Ctrl+V (hoặc Command+V) để dán vào.");
-    }).catch(() => {
-        alert("Lỗi khi copy. Vui lòng thử lại.");
-    });
-  };
-
   const handleAutoSync = async () => {
+    // Uses the read-only GVIZ CSV endpoint for initial pulling
     if (!sheetUrl) return alert("Vui lòng cấu hình URL Google Sheets trước (vào Home > Cài đặt).");
     
     setIsSyncing(true);
     try {
       const newData = await fetchPublicSheetCsv(sheetUrl);
       if (newData.length === 0) {
-        alert("Không tải được dữ liệu.\n\nLƯU Ý QUAN TRỌNG:\nBạn phải đặt quyền chia sẻ Google Sheet là:\n'Anyone with the link can view' (Bất kỳ ai có liên kết đều có thể xem).");
+        alert("Không tải được dữ liệu.");
+        setIsSyncing(false);
         return;
       }
       
@@ -367,8 +409,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         mastered: d.mastered
       }));
       
-      // Update LocalStorage
-      // Merge logic: Overwrite existing manually
       const raw = localStorage.getItem(`manual_words_${currentUser}`);
       let manual: Flashcard[] = raw ? JSON.parse(raw) : [];
       const existingWords = new Set(newCards.map(c => c.word));
@@ -377,17 +417,18 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
       
       localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
       
-      // Update Mastery
       const currentMastery = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
       newCards.forEach(c => {
         if (c.mastered) currentMastery[c.word] = true;
-        // Optional: if false in sheet, should we set false in app? 
-        // For now, let's respect the sheet status if it's explicitly TRUE.
       });
       localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(currentMastery));
 
-      alert(`Đồng bộ thành công! Đã cập nhật ${newCards.length} từ vựng từ Sheet.`);
+      alert(`Đã tải về ${newCards.length} từ vựng từ Sheet.`);
       loadCards();
+      
+      // Optional: Sync back to the specific user script sheet to keep it in sync
+      if (scriptUrl) await syncUserSheet(scriptUrl, currentUser, updatedManual);
+
       if (onDataChange) onDataChange();
       
     } catch (e) {
@@ -398,84 +439,12 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     }
   };
 
-  const handleProcessImport = () => {
-    if (!importText.trim()) return;
-
-    try {
-      const rows = importText.trim().split('\n');
-      const newCards: Flashcard[] = [];
-      const masteryUpdates: Record<string, boolean> = {};
-
-      // Bỏ qua dòng header nếu có
-      const startIdx = (rows[0].includes("Hán tự") || rows[0].includes("Pinyin")) ? 1 : 0;
-
-      for (let i = startIdx; i < rows.length; i++) {
-        const cols = rows[i].split('\t');
-        if (cols.length >= 4) {
-          const word = cols[0].trim();
-          const pinyin = cols[1].trim();
-          const hanViet = cols[2].trim();
-          const meaning = cols[3].trim();
-          const category = cols[4] ? cols[4].trim() : 'Khác';
-          const masteredStr = cols[5] ? cols[5].trim().toUpperCase() : 'FALSE';
-          const mastered = masteredStr === 'TRUE' || masteredStr === 'YES' || masteredStr === '1';
-
-          if (word) {
-            newCards.push({
-              id: `imported-${Date.now()}-${i}`,
-              word,
-              pinyin,
-              hanViet,
-              meaning,
-              category,
-              isManual: true,
-              mastered
-            });
-            if (mastered) masteryUpdates[word] = true;
-          }
-        }
-      }
-
-      if (newCards.length > 0) {
-        // Cập nhật Local Storage
-        const raw = localStorage.getItem(`manual_words_${currentUser}`);
-        let manual: Flashcard[] = raw ? JSON.parse(raw) : [];
-        if (!Array.isArray(manual)) manual = [];
-
-        // Hợp nhất: Xóa từ cũ trùng tên, thêm từ mới
-        const existingWords = new Set(newCards.map(c => c.word));
-        const filteredManual = manual.filter(m => !existingWords.has(m.word));
-        const updatedManual = [...filteredManual, ...newCards];
-        
-        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManual));
-
-        // Cập nhật Mastery
-        const currentMastery = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
-        const updatedMastery = { ...currentMastery, ...masteryUpdates };
-        localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(updatedMastery));
-
-        alert(`Đã nhập thành công ${newCards.length} từ!`);
-        setShowImportModal(false);
-        setImportText('');
-        loadCards();
-        if (onDataChange) onDataChange();
-      } else {
-        alert("Không nhận diện được dữ liệu. Hãy đảm bảo bạn đã copy từ Sheet/Excel đúng định dạng (có các cột).");
-      }
-
-    } catch (e) {
-      console.error(e);
-      alert("Lỗi khi xử lý dữ liệu nhập.");
-    }
-  };
-
   if (cards.length === 0 && !showAddModal && !showImportModal) return (
     <div className="py-20 px-6 text-center flex flex-col items-center">
       <div className="text-6xl mb-6 opacity-20">🗂️</div>
       <h3 className="text-lg font-black text-slate-300 uppercase tracking-widest">Chưa có từ vựng</h3>
       <div className="flex flex-col gap-3 mt-6">
         <button onClick={() => setShowAddModal(true)} className="bg-rose-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest shadow-lg active:scale-95 uppercase">Thêm từ đầu tiên</button>
-        <button onClick={() => setShowImportModal(true)} className="bg-blue-50 text-blue-600 px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest shadow-sm active:scale-95 uppercase">Nhập từ Excel/Sheet</button>
         <button onClick={handleAutoSync} disabled={isSyncing} className="bg-emerald-50 text-emerald-600 px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest shadow-sm active:scale-95 uppercase flex items-center justify-center gap-2">
            {isSyncing ? <div className="w-3 h-3 border-2 border-emerald-600/30 border-t-emerald-600 rounded-full animate-spin"></div> : 'Đồng bộ từ Sheet'}
         </button>
@@ -620,22 +589,15 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         <div className="space-y-3 pb-20">
           <div className="flex flex-col gap-3">
              <div className="flex gap-2">
-               <button onClick={handleCopyForSheet} className="flex-1 bg-amber-50 text-amber-700 border border-amber-200 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-sm">
-                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
-                 Copy dữ liệu
-               </button>
                <button onClick={handleAutoSync} disabled={isSyncing} className="flex-1 bg-emerald-50 text-emerald-700 border border-emerald-200 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-sm">
                    {isSyncing ? (
                      <div className="w-3 h-3 border-2 border-emerald-600/30 border-t-emerald-600 rounded-full animate-spin"></div>
                    ) : (
                      <>
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                        Đồng bộ Auto
+                        Đồng bộ từ Sheet (Load)
                      </>
                    )}
-               </button>
-               <button onClick={openGoogleSheet} className="w-12 bg-green-50 text-green-700 border border-green-200 rounded-xl flex items-center justify-center active:scale-90 transition-all">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                </button>
              </div>
              
