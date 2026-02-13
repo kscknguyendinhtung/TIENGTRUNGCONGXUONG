@@ -14,6 +14,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>(AppTab.USER_SELECT);
   const [currentUser, setCurrentUser] = useState<string | null>(localStorage.getItem('current_user'));
   const [showSyncModal, setShowSyncModal] = useState(false);
+  const [dataVersion, setDataVersion] = useState(0); // Dùng để force refresh các view
   
   // Script 1: Reading/Grammar
   const [readingScriptUrl, setReadingScriptUrl] = useState(() => {
@@ -53,13 +54,12 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // --- STARTUP LOGIC: Load BOTH Scripts ---
   const loadCloudData = async (user: string) => {
     setSyncState('syncing');
-    console.log("Loading Cloud Data for:", user);
+    console.log("Đang tải dữ liệu Cloud cho:", user);
     
     try {
-      // Parallel Fetch
+      // Tải song song từ cả 2 Script
       const [readingRes, vocabRes] = await Promise.all([
         fetchFromScript(readingScriptUrl, user),
         fetchFromScript(vocabScriptUrl, user)
@@ -67,17 +67,17 @@ const App: React.FC = () => {
 
       let hasUpdate = false;
 
-      // 1. Process Reading Script (Script 1)
+      // 1. Xử lý Script 1 (Luyện đọc & Ngữ pháp)
       if (readingRes && readingRes.reading && Array.isArray(readingRes.reading)) {
         localStorage.setItem(`reading_${user}`, JSON.stringify(readingRes.reading));
-        console.log(`Loaded ${readingRes.reading.length} lessons from Script 1`);
+        console.log(`Đã tải ${readingRes.reading.length} bài học từ Script 1`);
         hasUpdate = true;
       }
 
-      // 2. Process Vocab Script (Script 2)
+      // 2. Xử lý Script 2 (Từ vựng & Tiến độ)
       if (vocabRes && vocabRes.cards && Array.isArray(vocabRes.cards)) {
          const restoredCards: Flashcard[] = vocabRes.cards.map((d: any, i: number) => ({
-             id: `restored-${i}`,
+             id: `restored-${i}-${Date.now()}`,
              word: d.word,
              pinyin: d.pinyin,
              hanViet: d.hanViet,
@@ -93,20 +93,25 @@ const App: React.FC = () => {
              if (c.mastered) newMastery[c.word] = true;
          });
          localStorage.setItem(`mastery_${user}`, JSON.stringify(newMastery));
-         console.log(`Loaded ${restoredCards.length} words from Script 2`);
+         console.log(`Đã tải ${restoredCards.length} từ vựng từ Script 2`);
          hasUpdate = true;
       }
 
-      loadStats(user);
-      if (hasUpdate) setSyncState('idle');
-      else {
-        // If script data empty, try fallback to Sheet CSV if available
-        if (sheetUrl) triggerCloudRestoreFromSheet(user); 
-        else setSyncState('idle');
+      if (hasUpdate) {
+        setDataVersion(v => v + 1); // Kích hoạt làm mới các View
+        loadStats(user);
+        setSyncState('idle');
+      } else {
+        // Nếu không có dữ liệu trên Script, thử fallback về Sheet CSV
+        if (sheetUrl) {
+          await triggerCloudRestoreFromSheet(user);
+        } else {
+          setSyncState('idle');
+        }
       }
 
     } catch (e) {
-      console.error("Error loading cloud data", e);
+      console.error("Lỗi khi tải dữ liệu cloud", e);
       setSyncState('error');
     }
   };
@@ -117,7 +122,7 @@ const App: React.FC = () => {
         const cloudData = await fetchPublicSheetCsv(sheetUrl);
         if (cloudData && cloudData.length > 0) {
             const restoredCards: Flashcard[] = cloudData.map((d, i) => ({
-                id: `restored-${i}`,
+                id: `restored-csv-${i}`,
                 word: d.word,
                 pinyin: d.pinyin,
                 hanViet: d.hanViet,
@@ -130,14 +135,16 @@ const App: React.FC = () => {
             const newMastery: Record<string, boolean> = {};
             restoredCards.forEach(c => { if (c.mastered) newMastery[c.word] = true; });
             localStorage.setItem(`mastery_${user}`, JSON.stringify(newMastery));
+            setDataVersion(v => v + 1);
             loadStats(user);
         }
         setSyncState('idle');
-    } catch(e) { setSyncState('error'); }
+    } catch(e) { 
+      setSyncState('error'); 
+    }
   };
 
   useEffect(() => {
-    // Ensure defaults are set if missing (for first time load of code update)
     if (!localStorage.getItem('reading_script_url')) {
        localStorage.setItem('reading_script_url', DEFAULT_READING_SCRIPT);
        setReadingScriptUrl(DEFAULT_READING_SCRIPT);
@@ -149,12 +156,10 @@ const App: React.FC = () => {
 
     if (currentUser) {
        loadStats(currentUser);
-       // Trigger load on mount if user exists
        loadCloudData(currentUser);
     }
   }, [currentUser]); 
 
-  // --- SAVE LOGIC: Split to 2 Scripts ---
   const triggerCloudBackup = useCallback((user: string) => {
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     setSyncState('pending');
@@ -162,28 +167,23 @@ const App: React.FC = () => {
     syncTimeoutRef.current = setTimeout(async () => {
       setSyncState('syncing');
       try {
-        // 1. Prepare Vocab Data -> Script 2
         const manualData: Flashcard[] = JSON.parse(localStorage.getItem(`manual_words_${user}`) || '[]');
         const masteryData: Record<string, boolean> = JSON.parse(localStorage.getItem(`mastery_${user}`) || '{}');
         const vocabPayload = manualData.map(c => ({ ...c, mastered: !!masteryData[c.word] }));
-
-        // 2. Prepare Reading Data -> Script 1
         const readingData: SentenceAnalysis[] = JSON.parse(localStorage.getItem(`reading_${user}`) || '[]');
 
-        // Parallel Sync
         await Promise.all([
           vocabScriptUrl ? syncVocabData(vocabScriptUrl, user, vocabPayload) : Promise.resolve(),
           readingScriptUrl ? syncReadingData(readingScriptUrl, user, readingData) : Promise.resolve()
         ]);
         
-        console.log("Synced to both scripts successfully");
         setSyncState('idle');
         loadStats(user);
       } catch (e) {
-        console.error("Sync failed", e);
+        console.error("Lưu dữ liệu thất bại", e);
         setSyncState('error');
       }
-    }, 2000); // 2s debounce
+    }, 2000);
   }, [vocabScriptUrl, readingScriptUrl, loadStats]);
 
 
@@ -201,8 +201,6 @@ const App: React.FC = () => {
     setSheetUrl(newSheetUrl);
     localStorage.setItem('global_sheet_url', newSheetUrl);
     setActiveTab(AppTab.HOME);
-    
-    // LOAD DATA ON USER SELECT
     loadCloudData(user);
   };
 
@@ -245,16 +243,28 @@ const App: React.FC = () => {
   }
 
   const renderContent = () => {
+    // Dùng key={dataVersion} để force re-mount khi dữ liệu cloud được tải về
     switch (activeTab) {
       case AppTab.VOCABULARY: 
         return <FlashcardView 
+          key={`vocab-${dataVersion}`}
           currentUser={currentUser!} 
           onDataChange={() => triggerCloudBackup(currentUser!)}
           sheetUrl={sheetUrl}
-          scriptUrl={vocabScriptUrl} // Use Vocab Script URL
+          scriptUrl={vocabScriptUrl}
         />;
-      case AppTab.READING: return <ReadingView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} />;
-      case AppTab.GRAMMAR: return <GrammarView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} />;
+      case AppTab.READING: 
+        return <ReadingView 
+          key={`reading-${dataVersion}`}
+          currentUser={currentUser!} 
+          onDataChange={() => triggerCloudBackup(currentUser!)} 
+        />;
+      case AppTab.GRAMMAR: 
+        return <GrammarView 
+          key={`grammar-${dataVersion}`}
+          currentUser={currentUser!} 
+          onDataChange={() => triggerCloudBackup(currentUser!)} 
+        />;
       default:
         return (
           <div className="px-5 py-6 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -273,7 +283,7 @@ const App: React.FC = () => {
               </div>
               <div className="flex gap-2">
                 <button onClick={() => setShowSyncModal(true)} className="w-10 h-10 bg-white border border-slate-100 rounded-xl shadow-sm flex items-center justify-center text-slate-400 active:scale-90 transition-transform">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-1.065-2.572-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                 </button>
                 <button onClick={logout} className="w-10 h-10 bg-rose-50 border border-rose-100 rounded-xl shadow-sm flex items-center justify-center text-rose-400 active:scale-90 transition-transform">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
@@ -298,7 +308,6 @@ const App: React.FC = () => {
                <div className="absolute -top-16 -right-16 w-48 h-48 bg-blue-600/20 rounded-full blur-[60px]"></div>
               <div className="relative z-10">
                 <div className="flex items-center gap-2.5 mb-3">
-                   {/* Sync Indicator Logic */}
                    <div className={`w-2 h-2 rounded-full transition-colors duration-500 ${
                        syncState === 'syncing' ? 'bg-amber-400 animate-pulse' : 
                        syncState === 'pending' ? 'bg-blue-400' :
@@ -310,7 +319,7 @@ const App: React.FC = () => {
                         syncState === 'error' ? 'LỖI ĐỒNG BỘ' : 'ĐÃ KẾT NỐI'}
                    </h3>
                 </div>
-                <p className="text-xl font-black leading-tight mb-6 max-w-[200px]">Dữ liệu được tự động tải về khi mở App và lưu sau 2s.</p>
+                <p className="text-xl font-black leading-tight mb-6 max-w-[200px]">Dữ liệu tự động tải khi mở App và lưu sau 2 giây.</p>
                 <div className="flex gap-2">
                     <button 
                     onClick={() => triggerCloudBackup(currentUser!)} 
@@ -369,7 +378,6 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-slate-50 max-w-lg mx-auto shadow-2xl flex flex-col relative font-sans">
       <main className="flex-grow">{renderContent()}</main>
       
-      {/* Persistent Sync Status Indicator (Small) */}
       {activeTab !== AppTab.USER_SELECT && syncState !== 'idle' && (
          <div className="fixed top-4 right-4 z-[60] flex items-center gap-2 bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-full shadow-lg">
              <div className={`w-1.5 h-1.5 rounded-full ${syncState === 'syncing' ? 'bg-amber-400 animate-pulse' : 'bg-blue-400'}`}></div>
