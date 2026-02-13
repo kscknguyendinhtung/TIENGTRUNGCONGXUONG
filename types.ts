@@ -1,5 +1,4 @@
 
-
 export interface Flashcard {
   id: string;
   word: string;
@@ -34,6 +33,7 @@ export interface MindmapCategory {
     pinyin: string;
     meaning: string;
     hanViet: string;
+    category?: string;
   }[];
 }
 

@@ -14,9 +14,6 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<string | null>(localStorage.getItem('current_user'));
   const [showSyncModal, setShowSyncModal] = useState(false);
   
-  const [sentences, setSentences] = useState<SentenceAnalysis[]>([]);
-  const [manualCards, setManualCards] = useState<Flashcard[]>([]);
-
   const [readingScriptUrl, setReadingScriptUrl] = useState(() => localStorage.getItem('reading_script_url') || DEFAULT_READING_SCRIPT);
   const [vocabScriptUrl, setVocabScriptUrl] = useState(() => localStorage.getItem('vocab_script_url') || DEFAULT_VOCAB_SCRIPT);
   
@@ -24,26 +21,25 @@ const App: React.FC = () => {
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [stats, setStats] = useState({ vocabCount: 0, masteredCount: 0, lessonsCount: 0 });
 
-  const loadLocalData = useCallback((user: string) => {
-    const savedReading = localStorage.getItem(`reading_${user}`);
-    const savedVocab = localStorage.getItem(`manual_words_${user}`);
+  const loadStats = useCallback((user: string) => {
+    const readingData = JSON.parse(localStorage.getItem(`reading_${user}`) || '[]');
     const masteryData = JSON.parse(localStorage.getItem(`mastery_${user}`) || '{}');
-
-    const parsedReading = savedReading ? JSON.parse(savedReading) : [];
-    const parsedVocab = savedVocab ? JSON.parse(savedVocab) : [];
-
-    setSentences(parsedReading);
-    setManualCards(parsedVocab);
+    const manualData = JSON.parse(localStorage.getItem(`manual_words_${user}`) || '[]');
+    
+    const uniqueWords = new Set();
+    readingData.forEach((s: SentenceAnalysis) => s.words?.forEach(w => uniqueWords.add(w.text)));
+    manualData.forEach((m: any) => uniqueWords.add(m.word));
 
     const masteredCount = Object.values(masteryData).filter(v => v === true).length;
+
     setStats({
-      vocabCount: parsedVocab.length,
+      vocabCount: uniqueWords.size,
       masteredCount: masteredCount,
-      lessonsCount: parsedReading.length
+      lessonsCount: readingData.length
     });
   }, []);
 
-  const downloadFromCloud = async (user: string) => {
+  const loadCloudData = async (user: string) => {
     if (syncState === 'syncing') return;
     setSyncState('syncing');
     
@@ -61,14 +57,13 @@ const App: React.FC = () => {
         hasUpdate = true;
       }
 
-      // 2. Script 2: Từ vựng & Cột E
+      // 2. Script 2: Từ vựng & Mastery
       if (vocabRes && vocabRes.cards && Array.isArray(vocabRes.cards)) {
         const restoredCards: Flashcard[] = vocabRes.cards.map((d: any, i: number) => ({
-          id: d.id || `cloud-${i}-${Date.now()}`,
-          word: d.word, pinyin: d.pinyin, hanViet: d.hanViet, meaning: d.meaning, 
+          id: `cloud-${i}-${Date.now()}`,
+          word: d.word, pinyin: d.pinyin, hanViet: d.hanViet, meaning: d.meaning,
           category: d.category, mastered: d.mastered, isManual: true
         }));
-        
         localStorage.setItem(`manual_words_${user}`, JSON.stringify(restoredCards));
         
         const newMastery: Record<string, boolean> = {};
@@ -77,80 +72,65 @@ const App: React.FC = () => {
         hasUpdate = true;
       }
 
-      if (hasUpdate) {
-        loadLocalData(user);
-        setSyncState('idle');
-        alert("Đã tải dữ liệu thành công!");
-      } else {
-        setSyncState('idle');
-        alert("Không tìm thấy dữ liệu mới.");
-      }
+      loadStats(user);
+      setSyncState('idle');
+      if (hasUpdate) alert("Dữ liệu đã được cập nhật từ Cloud!");
     } catch (e) {
       setSyncState('error');
-      alert("Lỗi tải dữ liệu. Hãy kiểm tra Script URL.");
+      alert("Lỗi tải dữ liệu Cloud. Vui lòng kiểm tra lại Script URL.");
     }
   };
 
-  const uploadToCloud = async (user: string) => {
-    if (syncState === 'syncing') return;
-    setSyncState('syncing');
-    try {
-      const currentSentences = JSON.parse(localStorage.getItem(`reading_${user}`) || '[]');
-      const currentManual = JSON.parse(localStorage.getItem(`manual_words_${user}`) || '[]');
-      const currentMastery = JSON.parse(localStorage.getItem(`mastery_${user}`) || '{}');
-
-      const vocabPayload = currentManual.map((c: Flashcard) => ({ 
-        ...c, 
-        mastered: !!currentMastery[c.word] 
-      }));
-
-      await Promise.all([
-        vocabScriptUrl ? syncVocabData(vocabScriptUrl, user, vocabPayload) : Promise.resolve(),
-        readingScriptUrl ? syncReadingData(readingScriptUrl, user, currentSentences) : Promise.resolve()
-      ]);
-      setSyncState('idle');
-    } catch (e) { 
-      setSyncState('error'); 
-    }
-  };
-
-  const triggerCloudBackupDebounced = useCallback((user: string) => {
+  const triggerCloudBackup = useCallback((user: string) => {
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     setSyncState('pending');
-    syncTimeoutRef.current = setTimeout(() => uploadToCloud(user), 5000);
-  }, []);
+
+    syncTimeoutRef.current = setTimeout(async () => {
+      setSyncState('syncing');
+      try {
+        const manualData = JSON.parse(localStorage.getItem(`manual_words_${user}`) || '[]');
+        const masteryData = JSON.parse(localStorage.getItem(`mastery_${user}`) || '{}');
+        const vocabPayload = manualData.map((c: Flashcard) => ({ ...c, mastered: !!masteryData[c.word] }));
+        const readingData = JSON.parse(localStorage.getItem(`reading_${user}`) || '[]');
+
+        await Promise.all([
+          vocabScriptUrl ? syncVocabData(vocabScriptUrl, user, vocabPayload) : Promise.resolve(),
+          readingScriptUrl ? syncReadingData(readingScriptUrl, user, readingData) : Promise.resolve()
+        ]);
+        
+        setSyncState('idle');
+        loadStats(user);
+      } catch (e) { setSyncState('error'); }
+    }, 2000);
+  }, [vocabScriptUrl, readingScriptUrl, loadStats]);
 
   useEffect(() => {
-    if (currentUser) loadLocalData(currentUser);
-  }, [currentUser, loadLocalData]);
+    if (currentUser) {
+      loadStats(currentUser);
+      loadCloudData(currentUser);
+    }
+  }, [currentUser, loadStats]);
 
   const selectUser = async (user: string) => {
     setCurrentUser(user);
     localStorage.setItem('current_user', user);
     setActiveTab(AppTab.HOME);
-    downloadFromCloud(user);
-  };
-
-  const handleDataChange = () => {
-    if (currentUser) {
-      loadLocalData(currentUser);
-      triggerCloudBackupDebounced(currentUser);
-    }
+    loadCloudData(user);
   };
 
   if (activeTab === AppTab.USER_SELECT) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-white overflow-hidden relative">
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-white overflow-hidden relative font-sans">
         <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
           <div className="absolute top-[-10%] left-[-10%] w-[60%] h-[40%] bg-blue-600 blur-[120px] rounded-full"></div>
           <div className="absolute bottom-[-10%] right-[-10%] w-[60%] h-[40%] bg-rose-600 blur-[120px] rounded-full"></div>
         </div>
         <div className="relative z-10 text-center mb-10 w-full">
-          <div className="w-20 h-20 bg-gradient-to-tr from-blue-600 to-indigo-500 rounded-3xl mx-auto mb-6 flex items-center justify-center shadow-xl">
+          <div className="w-20 h-20 bg-gradient-to-tr from-blue-600 to-indigo-500 rounded-3xl mx-auto mb-6 flex items-center justify-center shadow-2xl">
             <span className="text-4xl font-black italic">文</span>
           </div>
           <h1 className="text-4xl font-black tracking-tighter uppercase mb-2">Zhongwen Master</h1>
-          <p className="text-slate-500 font-black uppercase text-[9px] tracking-[0.4em]">PASSION FOR CHINESE</p>
+          <p className="text-slate-500 font-black uppercase text-[9px] tracking-[0.4em]">Industrial Chinese Platform</p>
         </div>
         <div className="grid grid-cols-2 gap-3 w-full max-w-sm relative z-10">
           {USERS.map(user => (
@@ -166,17 +146,17 @@ const App: React.FC = () => {
 
   const renderContent = () => {
     switch (activeTab) {
-      case AppTab.VOCABULARY: return <FlashcardView currentUser={currentUser!} manualCards={manualCards} onDataChange={handleDataChange} scriptUrl={vocabScriptUrl} />;
-      case AppTab.READING: return <ReadingView currentUser={currentUser!} sentences={sentences} onDataChange={handleDataChange} />;
-      case AppTab.GRAMMAR: return <GrammarView currentUser={currentUser!} sentences={sentences} onDataChange={handleDataChange} />;
+      case AppTab.VOCABULARY: return <FlashcardView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} scriptUrl={vocabScriptUrl} />;
+      case AppTab.READING: return <ReadingView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} />;
+      case AppTab.GRAMMAR: return <GrammarView currentUser={currentUser!} onDataChange={() => triggerCloudBackup(currentUser!)} />;
       default: return (
         <div className="px-5 py-6 space-y-6">
           <header className="flex justify-between items-center mt-2">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 bg-slate-900 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-lg border border-white/10">{currentUser?.charAt(0)}</div>
               <div>
-                <h1 className="text-2xl font-black text-slate-900 tracking-tight">Chào, {currentUser}!</h1>
-                <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest">{syncState === 'idle' ? 'SẴN SÀNG' : 'ĐANG XỬ LÝ...'}</p>
+                <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-none">Chào, {currentUser}!</h1>
+                <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mt-1">{syncState === 'idle' ? 'Cloud Connected' : 'Syncing...'}</p>
               </div>
             </div>
             <div className="flex gap-2">
@@ -194,21 +174,22 @@ const App: React.FC = () => {
              ))}
           </div>
 
-          <div className="bg-slate-900 p-6 rounded-[32px] text-white shadow-xl relative overflow-hidden">
+          <div className="bg-slate-900 p-6 rounded-[32px] text-white shadow-xl relative overflow-hidden group">
+             <div className="absolute -top-16 -right-16 w-48 h-48 bg-blue-600/20 rounded-full blur-[60px]"></div>
              <div className="relative z-10">
-                <p className="text-xl font-black leading-tight mb-6">Đồng bộ dữ liệu của bạn với Cloud ngay.</p>
+                <p className="text-xl font-black leading-tight mb-6">Đồng bộ Bài học (Script 1) và Từ vựng (Script 2).</p>
                 <div className="flex gap-2">
-                    <button onClick={() => uploadToCloud(currentUser!)} className="bg-white text-slate-900 px-6 py-4 rounded-2xl font-black text-[10px] flex-1 justify-center uppercase">Lưu lên</button>
-                    <button onClick={() => downloadFromCloud(currentUser!)} className="bg-blue-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] flex-1 justify-center uppercase">Tải về</button>
+                    <button onClick={() => triggerCloudBackup(currentUser!)} className="bg-white text-slate-900 px-6 py-4 rounded-2xl font-black text-[10px] flex-1 justify-center uppercase">Lưu Cloud</button>
+                    <button onClick={() => loadCloudData(currentUser!)} className="bg-blue-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] flex-1 justify-center uppercase">Tải về</button>
                 </div>
               </div>
           </div>
 
           <div className="grid gap-3 pt-1 pb-24">
-            {[{ tab: AppTab.VOCABULARY, color: 'rose', char: '字', title: 'Học Từ Vựng', sub: 'Flashcards & Mastery' }, { tab: AppTab.GRAMMAR, color: 'emerald', char: '法', title: 'Học Ngữ Pháp', sub: 'Grammar AI Analysis' }, { tab: AppTab.READING, color: 'blue', char: '阅', title: 'Luyện Đọc AI', sub: 'OCR & Auto Prepend' }].map(item => (
-              <button key={item.tab} onClick={() => setActiveTab(item.tab)} className="bg-white p-5 rounded-[32px] border border-slate-100 flex items-center justify-between shadow-sm active:scale-[0.98] text-left">
+            {[{ tab: AppTab.VOCABULARY, color: 'rose', char: '字', title: 'Học Từ Vựng', sub: 'Flashcards & Mastery' }, { tab: AppTab.GRAMMAR, color: 'emerald', char: '法', title: 'Học Ngữ Pháp', sub: 'Grammar AI Analysis' }, { tab: AppTab.READING, color: 'blue', char: '阅', title: 'Luyện Đọc AI', sub: 'OCR & Auto Vocab' }].map(item => (
+              <button key={item.tab} onClick={() => setActiveTab(item.tab)} className="bg-white p-5 rounded-[32px] border border-slate-100 flex items-center justify-between group shadow-sm active:scale-[0.98] text-left">
                 <div className="flex items-center gap-5">
-                  <div className={`w-16 h-16 bg-slate-50 rounded-[20px] flex items-center justify-center text-3xl font-black text-slate-300`}>{item.char}</div>
+                  <div className={`w-16 h-16 bg-slate-50 text-slate-300 rounded-[20px] flex items-center justify-center text-3xl font-black group-hover:bg-${item.color}-600 group-hover:text-white transition-all`}>{item.char}</div>
                   <div>
                     <h2 className="text-xl font-black text-slate-900 tracking-tighter mb-0.5">{item.title}</h2>
                     <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest">{item.sub}</p>
@@ -230,7 +211,7 @@ const App: React.FC = () => {
       {showSyncModal && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl flex items-center justify-center p-6 z-[100]">
           <div className="bg-white w-full max-w-sm p-8 rounded-[40px] shadow-2xl">
-            <h2 className="text-2xl font-black mb-1 text-slate-900 tracking-tighter uppercase">Cấu hình Script</h2>
+            <h2 className="text-2xl font-black mb-1 text-slate-900 tracking-tighter uppercase">Cài đặt Script</h2>
             <div className="space-y-6 mt-6">
               <div>
                 <label className="text-[9px] font-black text-blue-500 uppercase tracking-widest block mb-2">Script 1 (Bài học)</label>
@@ -241,7 +222,7 @@ const App: React.FC = () => {
                 <input type="text" value={vocabScriptUrl} onChange={(e) => { setVocabScriptUrl(e.target.value); localStorage.setItem('vocab_script_url', e.target.value); }} className="w-full px-5 py-4 bg-rose-50 rounded-2xl outline-none font-bold text-xs" />
               </div>
             </div>
-            <button onClick={() => setShowSyncModal(false)} className="w-full mt-8 py-5 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase">Lưu</button>
+            <button onClick={() => setShowSyncModal(false)} className="w-full mt-8 py-5 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase">Lưu Cấu Hình</button>
           </div>
         </div>
       )}
@@ -249,9 +230,9 @@ const App: React.FC = () => {
       {activeTab !== AppTab.USER_SELECT && (
         <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-slate-100 py-3 px-6 flex justify-around max-w-lg mx-auto z-40 rounded-t-[40px] shadow-lg">
           {[{ tab: AppTab.HOME, icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', label: 'Home' }, { tab: AppTab.VOCABULARY, icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10', label: 'Từ vựng' }, { tab: AppTab.GRAMMAR, icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01', label: 'Ngữ Pháp' }, { tab: AppTab.READING, icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253', label: 'Quét AI' }].map(item => (
-            <button key={item.tab} onClick={() => setActiveTab(item.tab)} className={`flex flex-col items-center ${activeTab === item.tab ? 'text-blue-600' : 'text-slate-300'}`}>
-              <div className={`p-2.5 rounded-2xl ${activeTab === item.tab ? 'bg-blue-50' : ''}`}><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d={item.icon}/></svg></div>
-              <span className="text-[8px] font-black mt-0.5 uppercase tracking-widest">{item.label}</span>
+            <button key={item.tab} onClick={() => setActiveTab(item.tab)} className={`flex flex-col items-center transition-all ${activeTab === item.tab ? 'text-blue-600' : 'text-slate-300'}`}>
+              <div className={`p-2.5 rounded-2xl ${activeTab === item.tab ? 'bg-blue-50' : 'bg-transparent'}`}><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d={item.icon}/></svg></div>
+              <span className={`text-[8px] font-black mt-0.5 uppercase tracking-widest ${activeTab === item.tab ? 'opacity-100' : 'opacity-0'}`}>{item.label}</span>
             </button>
           ))}
         </nav>
