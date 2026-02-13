@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { analyzeImageAndExtractText, speakText, toggleBackgroundMode } from '../services/geminiService';
-import { SentenceAnalysis } from '../types';
+import { SentenceAnalysis, Flashcard } from '../types';
 
 interface ReadingViewProps { 
   currentUser: string; 
@@ -63,14 +63,54 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
     const base64Images = await Promise.all(base64Promises);
     try {
       const result = await analyzeImageAndExtractText(base64Images);
+      
+      // 1. Process Sentences for Reading List
       const newSentences = result.map((s, idx) => ({ 
         ...s, 
         id: `read-${Date.now()}-${idx}-${Math.floor(Math.random() * 10000)}`, 
         mastered: false 
       }));
-      const updated = [...sentences, ...newSentences];
+      
+      // 2. Extract Words and PREPEND to Manual Vocab List (Script 2)
+      const extractedWords: Flashcard[] = [];
+      newSentences.forEach(s => {
+        s.words?.forEach(w => {
+          extractedWords.push({
+            id: `auto-${Date.now()}-${Math.random()}`,
+            word: w.text,
+            pinyin: w.pinyin,
+            hanViet: w.hanViet,
+            meaning: w.meaning,
+            category: w.category || 'Khác',
+            isManual: true,
+            mastered: false
+          });
+        });
+      });
+
+      if (extractedWords.length > 0) {
+        const localManualRaw = localStorage.getItem(`manual_words_${currentUser}`);
+        const currentManualWords: Flashcard[] = localManualRaw ? JSON.parse(localManualRaw) : [];
+        
+        // Remove duplicates (checking by word text)
+        const existingTexts = new Set(currentManualWords.map(m => m.word));
+        const trulyNewWords = extractedWords.filter(w => !existingTexts.has(w.word));
+        
+        // Update local vocabulary list with new words at the BEGINNING (PREPEND)
+        // This ensures they appear at the top of the list and the Sheet after sync
+        const updatedManualWords = [...trulyNewWords, ...currentManualWords];
+        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManualWords));
+      }
+
+      // Add to sentences (Reading AI view)
+      const updated = [...newSentences, ...sentences]; // Also prepend to reading view
       saveAndNotify(updated);
+      
+      // Trigger sync immediately via onDataChange
+      if (onDataChange) onDataChange();
+      
     } catch (err) {
+      console.error(err);
       alert("Lỗi phân tích hình ảnh.");
     } finally {
       setLoading(false);

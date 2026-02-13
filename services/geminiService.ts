@@ -1,5 +1,4 @@
 
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { SentenceAnalysis, Flashcard, MindmapCategory } from "../types";
 
@@ -80,7 +79,14 @@ export const syncVocabData = async (scriptUrl: string, user: string, cards: Flas
   const payload = {
     user: user,
     action: 'save_vocab',
-    cards: cards.map(c => ({ word: c.word, pinyin: c.pinyin, hanViet: c.hanViet, meaning: c.meaning, category: c.category || 'Khác', mastered: c.mastered || false }))
+    cards: cards.map(c => ({ 
+      word: c.word, 
+      pinyin: c.pinyin, 
+      hanViet: c.hanViet, 
+      meaning: c.meaning, 
+      category: c.category || 'Khác', 
+      mastered: c.mastered || false 
+    }))
   };
   try {
     await fetch(scriptUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
@@ -138,8 +144,7 @@ export const extractVocabulary = async (input: { text?: string, imageBase64?: st
     - pinyin: Pinyin chuẩn có dấu thanh.
     - hanViet: Âm Hán Việt.
     - meaning: Nghĩa tiếng Việt ngắn gọn, súc tích.
-    - category: Tự động phân loại chính xác vào 1 trong các nhóm: 
-       "Danh từ", "Động từ", "Tính từ", "Mẫu câu", "Sản xuất" (SMT, Máy móc), "Chất lượng" (QC/QA), "Nhân sự", "Văn phòng", "Khác".
+    - category: BẮT BUỘC phân loại vào 1 trong các nhóm sau: "Danh từ", "Động từ", "Tính từ", "Mẫu câu", "Sản xuất", "Chất lượng", "Nhân sự", "Văn phòng", "Khác".
     `
   });
   const response = await ai.models.generateContent({
@@ -166,7 +171,10 @@ export const analyzeImageAndExtractText = async (base64Images: string[]): Promis
   const imageParts = base64Images.map(base64 => ({ inlineData: { data: base64, mimeType: 'image/jpeg' } }));
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview', 
-    contents: { parts: [...imageParts, { text: `NHIỆM VỤ: OCR tiếng Trung và phân tích từ vựng/ngữ pháp chi tiết.` }] },
+    contents: { parts: [...imageParts, { 
+      text: `NHIỆM VỤ: OCR tiếng Trung và phân tích từ vựng/ngữ pháp chi tiết. 
+      Yêu cầu BẮT BUỘC phân loại từ vựng vào 1 trong các danh mục: "Danh từ", "Động từ", "Tính từ", "Mẫu câu", "Sản xuất", "Chất lượng", "Nhân sự", "Văn phòng", "Khác".` 
+    }] },
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -178,7 +186,16 @@ export const analyzeImageAndExtractText = async (base64Images: string[]): Promis
             pinyin: { type: Type.STRING },
             meaning: { type: Type.STRING },
             grammarPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
-            words: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { text: { type: Type.STRING }, pinyin: { type: Type.STRING }, meaning: { type: Type.STRING }, hanViet: { type: Type.STRING }, category: { type: Type.STRING } } } }
+            words: { type: Type.ARRAY, items: { 
+              type: Type.OBJECT, 
+              properties: { 
+                text: { type: Type.STRING }, 
+                pinyin: { type: Type.STRING }, 
+                meaning: { type: Type.STRING }, 
+                hanViet: { type: Type.STRING }, 
+                category: { type: Type.STRING } 
+              } 
+            } }
           }
         }
       }
@@ -195,7 +212,7 @@ export const generateMindmap = async (words: { text: string, pinyin: string, mea
   const prompt = `
     NHIỆM VỤ: Phân tích và sắp xếp danh sách từ vựng tiếng Trung sau đây vào các nhóm logic (Mindmap) để người học dễ ghi nhớ nhất.
     YÊU CẦU:
-    - Phân nhóm theo chủ đề công việc (Sản xuất, Chất lượng, Văn phòng, Máy móc, ...) hoặc theo Từ loại (Danh từ, Động từ, ...).
+    - Phân nhóm theo các danh mục: "Danh từ", "Động từ", "Tính từ", "Mẫu câu", "Sản xuất", "Chất lượng", "Nhân sự", "Văn phòng", "Khác".
     - Trả về kết quả dưới dạng JSON Array các đối tượng Category.
     - Đảm bảo trích xuất chính xác các trường: text, pinyin, meaning, hanViet từ dữ liệu đầu vào.
 
