@@ -5,7 +5,7 @@ import { SentenceAnalysis, Flashcard } from '../types';
 
 interface ReadingViewProps { 
   currentUser: string; 
-  sentences: SentenceAnalysis[]; // Nhận từ App.tsx
+  sentences: SentenceAnalysis[];
   onDataChange?: () => void;
 }
 
@@ -42,7 +42,6 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
       const result = await analyzeImageAndExtractText(base64Images);
       const newSentences = result.map((s, idx) => ({ ...s, id: `read-${Date.now()}-${idx}`, mastered: false }));
       
-      // PREPEND Words to Manual Vocab
       const extractedWords: Flashcard[] = [];
       newSentences.forEach(s => {
         s.words?.forEach(w => {
@@ -124,7 +123,19 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
                  <button onClick={() => toggleMastered(s.id)} className={`w-9 h-9 flex items-center justify-center rounded-xl transition-colors ${s.mastered ? 'bg-green-500 text-white' : 'bg-emerald-50 text-emerald-500'}`}><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg></button>
                </div>
             </div>
-            <div className="mb-6"><h4 className="text-[8px] font-black text-blue-400 uppercase tracking-widest mb-4">TỪ VỰNG</h4><div className="flex flex-wrap gap-x-3 gap-y-6">{s.words.map((w, wIdx) => (<div key={wIdx} className="flex flex-col items-center cursor-pointer active:opacity-60" onClick={() => setSelectedWord(w)}><span className="text-[8px] font-black text-blue-400 uppercase mb-0.5">{w.pinyin}</span><span className="text-2xl font-black text-slate-950 chinese-font leading-none">{w.text}</span><span className="text-[6px] font-black text-emerald-500 uppercase mt-1 tracking-widest">{w.category}</span></div>))}</div></div>
+            <div className="mb-6">
+              <h4 className="text-[8px] font-black text-blue-400 uppercase tracking-widest mb-4">TỪ VỰNG</h4>
+              <div className="flex flex-wrap gap-x-4 gap-y-7 items-end">
+                {s.words.map((w, wIdx) => (
+                  <div key={wIdx} className="flex flex-col items-center cursor-pointer active:opacity-60 text-center max-w-[80px]" onClick={() => setSelectedWord(w)}>
+                    <span className="text-[8px] font-black text-blue-400 uppercase mb-0.5">{w.pinyin}</span>
+                    <span className="text-2xl font-black text-slate-950 chinese-font leading-none">{w.text}</span>
+                    <span className="text-[7px] font-black text-slate-400 uppercase mt-1 tracking-tighter">{w.hanViet}</span>
+                    <span className="text-[6px] font-bold text-emerald-600 uppercase mt-0.5 tracking-tight line-clamp-1">{w.meaning}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
             <div className="mb-6 p-6 bg-slate-900 rounded-[28px] shadow-lg"><p className="text-white text-2xl font-black leading-relaxed chinese-font whitespace-pre-wrap">{s.chinese.replace(/[^\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef\n\r\s]/g, '').trim()}</p></div>
             <div className="mb-6 border-l-4 border-blue-100 pl-4"><p className="text-blue-600 text-sm font-black italic">{s.pinyin}</p></div>
             <div className="bg-slate-50 p-6 rounded-[28px] border border-slate-100/50"><p className="text-slate-800 font-bold text-sm">{s.meaning}</p></div>
