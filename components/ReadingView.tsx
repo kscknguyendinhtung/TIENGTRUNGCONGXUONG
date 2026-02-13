@@ -39,28 +39,40 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
     }));
     const base64Images = await Promise.all(base64Promises);
     try {
+      // AI phân tích bóc tách cả bài đọc và danh sách từ vựng
       const result = await analyzeImageAndExtractText(base64Images);
+      
+      // 1. Phân chia Bài học (Lưu Script 1)
       const newSentences = result.map((s, idx) => ({ ...s, id: `read-${Date.now()}-${idx}`, mastered: false }));
       
+      // 2. Phân chia Từ vựng (Chuẩn bị nạp vào Script 2)
       const extractedWords: Flashcard[] = [];
       newSentences.forEach(s => {
         s.words?.forEach(w => {
           extractedWords.push({
             id: `auto-${Date.now()}-${Math.random()}`,
-            word: w.text, pinyin: w.pinyin, hanViet: w.hanViet, meaning: w.meaning, category: w.category || 'Khác', isManual: true, mastered: false
+            word: w.text, pinyin: w.pinyin, hanViet: w.hanViet, meaning: w.meaning, 
+            category: w.category || 'Khác', isManual: true, mastered: false
           });
         });
       });
 
       if (extractedWords.length > 0) {
-        const localManual = JSON.parse(localStorage.getItem(`manual_words_${currentUser}`) || '[]');
-        const existingTexts = new Set(localManual.map((m: any) => m.word));
+        const localManualRaw = localStorage.getItem(`manual_words_${currentUser}`);
+        const currentManualWords: Flashcard[] = localManualRaw ? JSON.parse(localManualRaw) : [];
+        
+        // CHÈN LÊN ĐẦU danh sách từ vựng hiện tại
+        const existingTexts = new Set(currentManualWords.map(m => m.word));
         const trulyNewWords = extractedWords.filter(w => !existingTexts.has(w.word));
-        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify([...trulyNewWords, ...localManual]));
+        
+        const updatedManualWords = [...trulyNewWords, ...currentManualWords];
+        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManualWords));
       }
 
+      // Lưu bài học mới
       saveAndNotify([...newSentences, ...sentences]);
-    } catch (err) { alert("Lỗi quét ảnh."); } finally { 
+      alert(`Đã nạp bài đọc và ${extractedWords.length} từ vựng mới lên đầu danh sách.`);
+    } catch (err) { alert("Lỗi quét ảnh AI."); } finally { 
       setLoading(false); 
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -91,7 +103,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
 
       <div className="bg-slate-50 p-5 rounded-[28px] mb-6 border border-slate-100 flex flex-col gap-3">
         <div className="flex justify-between items-center">
-          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Tốc độ: {playbackSpeed}x</span>
+          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Tốc độ đọc: {playbackSpeed}x</span>
           <div className="flex gap-1">
             {[0.8, 1.0, 1.2].map(s => (
               <button key={s} onClick={() => setPlaybackSpeed(s)} className={`px-2.5 py-1 rounded-lg text-[9px] font-black transition-all ${playbackSpeed === s ? 'bg-blue-600 text-white' : 'bg-white text-slate-400 border border-slate-100'}`}>{s}x</button>
@@ -100,19 +112,19 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
         </div>
         <input type="range" min="0.5" max="2.0" step="0.1" value={playbackSpeed} onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))} className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"/>
         <div className="flex items-center justify-between pt-2 border-t border-slate-200">
-            <span className="text-[8px] font-bold text-slate-400 uppercase">Chạy ngầm (iOS):</span>
+            <span className="text-[8px] font-bold text-slate-400 uppercase">iOS Background:</span>
             <button onClick={handleToggleBackground} className={`px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${isBackgroundAudio ? 'bg-indigo-500 text-white' : 'bg-slate-200 text-slate-500'}`}>{isBackgroundAudio ? 'BẬT' : 'TẮT'}</button>
         </div>
       </div>
 
       <div className="flex gap-2 mb-8 bg-slate-100 p-1 rounded-2xl">
         <button onClick={() => setShowMastered(false)} className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all ${!showMastered ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400'}`}>ĐANG HỌC ({sentences.filter(s => !s.mastered).length})</button>
-        <button onClick={() => setShowMastered(true)} className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all ${showMastered ? 'bg-white shadow-sm text-green-600' : 'text-slate-400'}`}>THUỘC ({sentences.filter(s => s.mastered).length})</button>
+        <button onClick={() => setShowMastered(true)} className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all ${showMastered ? 'bg-white shadow-sm text-green-600' : 'text-slate-400'}`}>ĐÃ THUỘC ({sentences.filter(s => s.mastered).length})</button>
       </div>
 
       <div className="space-y-12">
         {currentList.length === 0 ? (
-          <div className="py-20 text-center"><p className="text-slate-300 font-black text-[10px] uppercase tracking-widest">Trống - Hãy bấm Tải về ở Home</p></div>
+          <div className="py-20 text-center"><p className="text-slate-300 font-black text-[10px] uppercase tracking-widest italic">Chưa có nội dung bài học</p></div>
         ) : currentList.map((s, idx) => (
           <div key={s.id} className="relative animate-in fade-in slide-in-from-bottom-2">
             <div className="flex justify-between items-center mb-5">
@@ -123,22 +135,23 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
                  <button onClick={() => toggleMastered(s.id)} className={`w-9 h-9 flex items-center justify-center rounded-xl transition-colors ${s.mastered ? 'bg-green-500 text-white' : 'bg-emerald-50 text-emerald-500'}`}><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg></button>
                </div>
             </div>
-            <div className="mb-6">
-              <h4 className="text-[8px] font-black text-blue-400 uppercase tracking-widest mb-4">TỪ VỰNG</h4>
+            
+            <div className="mb-6 p-6 bg-slate-900 rounded-[28px] shadow-lg"><p className="text-white text-2xl font-black leading-relaxed chinese-font whitespace-pre-wrap">{s.chinese.replace(/[^\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef\n\r\s]/g, '').trim()}</p></div>
+            <div className="mb-6 border-l-4 border-blue-100 pl-4"><p className="text-blue-600 text-sm font-black italic">{s.pinyin}</p></div>
+            <div className="bg-slate-50 p-6 rounded-[28px] border border-slate-100/50"><p className="text-slate-800 font-bold text-sm">{s.meaning}</p></div>
+            
+            <div className="mt-8">
+              <h4 className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-4">TỪ VỰNG TRONG BÀI</h4>
               <div className="flex flex-wrap gap-x-4 gap-y-7 items-end">
                 {s.words.map((w, wIdx) => (
-                  <div key={wIdx} className="flex flex-col items-center cursor-pointer active:opacity-60 text-center max-w-[95px]" onClick={() => setSelectedWord(w)}>
+                  <div key={wIdx} className="flex flex-col items-center cursor-pointer active:opacity-60 text-center" onClick={() => setSelectedWord(w)}>
                     <span className="text-[8px] font-black text-blue-400 uppercase mb-0.5">{w.pinyin}</span>
                     <span className="text-2xl font-black text-slate-950 chinese-font leading-none">{w.text}</span>
-                    <span className="text-[9px] font-black text-rose-500 uppercase mt-1 tracking-tighter leading-none">{w.hanViet}</span>
-                    <span className="text-[8px] font-bold text-emerald-600 uppercase mt-1 tracking-tight line-clamp-2 min-h-[16px] leading-tight">{w.meaning}</span>
+                    <span className="text-[8px] font-black text-rose-500 uppercase mt-1 tracking-tighter">{w.hanViet}</span>
                   </div>
                 ))}
               </div>
             </div>
-            <div className="mb-6 p-6 bg-slate-900 rounded-[28px] shadow-lg"><p className="text-white text-2xl font-black leading-relaxed chinese-font whitespace-pre-wrap">{s.chinese.replace(/[^\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef\n\r\s]/g, '').trim()}</p></div>
-            <div className="mb-6 border-l-4 border-blue-100 pl-4"><p className="text-blue-600 text-sm font-black italic">{s.pinyin}</p></div>
-            <div className="bg-slate-50 p-6 rounded-[28px] border border-slate-100/50"><p className="text-slate-800 font-bold text-sm">{s.meaning}</p></div>
           </div>
         ))}
       </div>
@@ -149,7 +162,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
             <h3 className="text-6xl font-black mb-6 chinese-font text-slate-950 tracking-tighter">{selectedWord.text}</h3>
             <div className="flex flex-col gap-1 mb-6"><span className="text-blue-600 font-black text-xl uppercase">{selectedWord.pinyin}</span><span className="text-rose-500 font-black text-lg uppercase tracking-widest">{selectedWord.hanViet}</span></div>
             <p className="text-slate-600 text-lg font-bold mb-8 leading-tight">{selectedWord.meaning}</p>
-            <div className="flex gap-3"><button onClick={() => speakText(selectedWord.text, 'cn')} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-[10px] shadow-lg active:scale-95">NGHE</button><button onClick={() => setSelectedWord(null)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black text-[10px]">ĐÓNG</button></div>
+            <div className="flex gap-3"><button onClick={() => speakText(selectedWord.text, 'cn')} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-[10px] shadow-lg active:scale-95">NGHE PHÁT ÂM</button><button onClick={() => setSelectedWord(null)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black text-[10px]">ĐÓNG</button></div>
           </div>
         </div>
       )}

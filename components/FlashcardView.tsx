@@ -1,18 +1,16 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Flashcard, SentenceAnalysis, MindmapCategory } from '../types';
+import { Flashcard, SentenceAnalysis } from '../types';
 import { speakText, extractVocabulary, fetchPublicSheetCsv, syncVocabData, toggleBackgroundMode } from '../services/geminiService';
-import { MindmapView } from './MindmapView';
 
 interface FlashcardViewProps { 
   currentUser: string; 
+  manualCards: Flashcard[];
   onDataChange?: () => void;
-  sheetUrl?: string;
   scriptUrl: string;
-  manualCards: Flashcard[]; // Nhận trực tiếp từ App
 }
 
-export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDataChange, sheetUrl, scriptUrl, manualCards }) => {
+export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, manualCards, onDataChange, scriptUrl }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
@@ -33,13 +31,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
   const [inputText, setInputText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [showMindmap, setShowMindmap] = useState(false);
-  const [isSelectionMode, setIsSelectionMode] = useState(false);
-  const [selectedWords, setSelectedWords] = useState<Set<string>>(new Set());
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [importText, setImportText] = useState('');
-  const [isSyncing, setIsSyncing] = useState(false);
 
   // Lọc từ vựng
   const categories = useMemo(() => {
@@ -103,9 +94,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     if (!confirm(`Xóa từ "${word}"?`)) return;
     const updated = manualCards.filter(w => w.word !== word);
     localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updated));
-    const mastery = JSON.parse(localStorage.getItem(`mastery_${currentUser}`) || '{}');
-    delete mastery[word];
-    localStorage.setItem(`mastery_${currentUser}`, JSON.stringify(mastery));
     if (onDataChange) onDataChange();
   };
 
@@ -138,7 +126,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
       }
       if (newWordsRaw.length > 0) {
         const formatted: Flashcard[] = newWordsRaw.map((w, idx) => ({ id: `m-${Date.now()}-${idx}`, word: w.text, pinyin: w.pinyin, meaning: w.meaning, hanViet: w.hanViet, category: w.category, isManual: true, mastered: false }));
-        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify([...manualCards, ...formatted]));
+        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify([...formatted, ...manualCards]));
         setInputText(''); setShowAddModal(false); if (onDataChange) onDataChange();
       }
     } catch (e) { alert("Lỗi xử lý."); } finally { setIsProcessing(false); }
@@ -154,7 +142,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
   if (manualCards.length === 0 && !showAddModal) return (
     <div className="py-20 px-6 text-center flex flex-col items-center">
       <div className="text-6xl mb-6 opacity-20">🗂️</div>
-      <h3 className="text-lg font-black text-slate-300 uppercase tracking-widest leading-tight">Chưa có từ vựng.<br/>Hãy nhấn Tải về máy ở Home.</h3>
+      <h3 className="text-lg font-black text-slate-300 uppercase tracking-widest">Chưa có từ vựng. Hãy nhấn Quét AI hoặc Tải về ở Home.</h3>
       <button onClick={() => setShowAddModal(true)} className="mt-8 bg-rose-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest shadow-lg uppercase">Thêm từ thủ công</button>
     </div>
   );
@@ -163,7 +151,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
     <div className="px-5 py-4 max-w-lg mx-auto pb-28">
       <div className="flex flex-col gap-3 mb-6">
         <div className="flex justify-between items-center">
-          <h2 className="text-xl font-black text-rose-600 uppercase tracking-tighter">Flashcards</h2>
+          <h2 className="text-xl font-black text-rose-600 uppercase tracking-tighter">Từ vựng & Thẻ</h2>
           <div className="flex gap-2">
             <button onClick={() => setShowAddModal(true)} className="w-10 h-10 bg-rose-50 text-rose-600 rounded-xl flex items-center justify-center shadow-sm active:scale-90 transition-transform"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4"/></svg></button>
             <div className="bg-slate-100 p-1 rounded-xl flex">
@@ -183,20 +171,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
               <button onClick={() => setStudyFilter('unmastered')} className={`flex-1 px-3 py-1.5 rounded-lg font-black text-[8px] uppercase tracking-widest transition-all ${studyFilter === 'unmastered' ? 'bg-white shadow-sm text-rose-600' : 'text-slate-400'}`}>CHƯA</button>
            </div>
         </div>
-        
-        {viewMode === 'card' && (
-          <div className="bg-slate-900 p-5 rounded-[28px] text-white flex flex-col gap-3 shadow-lg">
-             <div className="flex justify-between items-center mb-1">
-                <span className="text-[8px] font-black uppercase tracking-[0.2em]">TỰ ĐỘNG CHẠY</span>
-                <button onClick={() => setIsAutoPlay(!isAutoPlay)} className={`px-4 py-1.5 rounded-full text-[8px] font-black transition-all ${isAutoPlay ? 'bg-rose-500 text-white' : 'bg-white text-slate-900'}`}>{isAutoPlay ? 'DỪNG' : 'BẮT ĐẦU'}</button>
-             </div>
-             <input type="range" min="0.5" max="2.0" step="0.1" value={playbackSpeed} onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))} className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-rose-500"/>
-             <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-                <span className="text-[8px] font-bold text-slate-400 uppercase">Chạy ngầm (iOS):</span>
-                <button onClick={handleToggleBackground} className={`px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${isBackgroundAudio ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-500'}`}>{isBackgroundAudio ? 'BẬT' : 'TẮT'}</button>
-             </div>
-          </div>
-        )}
       </div>
 
       {viewMode === 'card' && currentCard ? (
@@ -250,10 +224,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl flex items-center justify-center p-6 z-[150]">
           <div className="bg-white w-full max-w-sm p-8 rounded-[40px] shadow-2xl">
             <h2 className="text-2xl font-black mb-1 text-slate-900 tracking-tighter uppercase">Thêm từ vựng</h2>
-            <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
-               <button onClick={() => setAddMode('text')} className={`flex-1 py-2 rounded-lg font-black text-[9px] transition-all ${addMode === 'text' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400'}`}>VĂN BẢN</button>
-               <button onClick={() => setAddMode('image')} className={`flex-1 py-2 rounded-lg font-black text-[9px] transition-all ${addMode === 'image' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400'}`}>HÌNH ẢNH</button>
-            </div>
             <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder="Dán văn bản..." className="w-full h-32 px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-sm resize-none" />
             <div className="flex gap-3 mt-8">
                <button onClick={() => setShowAddModal(false)} className="flex-1 py-4 bg-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase">Hủy</button>

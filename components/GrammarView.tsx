@@ -5,7 +5,7 @@ import { SentenceAnalysis } from '../types';
 
 interface GrammarViewProps { 
   currentUser: string;
-  sentences: SentenceAnalysis[]; // Nhận trực tiếp từ App
+  sentences: SentenceAnalysis[];
   onDataChange?: () => void;
 }
 
@@ -51,7 +51,7 @@ export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser, sentences
 
       {sentences.length === 0 && (
         <div className="text-center py-16 bg-emerald-50 rounded-[32px] border-2 border-dashed border-emerald-100">
-           <p className="text-emerald-300 font-black text-[10px] uppercase tracking-widest">Chưa có bài học - Nhấn Tải về máy ở Home</p>
+           <p className="text-emerald-300 font-black text-[10px] uppercase tracking-widest">Chưa có bài học</p>
         </div>
       )}
 
@@ -68,7 +68,6 @@ export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser, sentences
                   <span className="text-[8px] text-rose-500 font-black mb-1 uppercase tracking-tighter leading-none">{w.pinyin}</span>
                   <span className="text-2xl font-black chinese-font leading-none">{w.text}</span>
                   <span className="text-[9px] text-slate-300 font-bold uppercase mt-1 tracking-widest leading-none">{w.hanViet}</span>
-                  <span className="text-[8px] font-bold text-emerald-600 uppercase mt-1 tracking-tight line-clamp-1 leading-none">{w.meaning}</span>
                 </div>
               ))}
             </div>
