@@ -39,13 +39,9 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
     }));
     const base64Images = await Promise.all(base64Promises);
     try {
-      // AI phân tích bóc tách cả bài đọc và danh sách từ vựng
       const result = await analyzeImageAndExtractText(base64Images);
-      
-      // 1. Phân chia Bài học (Lưu Script 1)
       const newSentences = result.map((s, idx) => ({ ...s, id: `read-${Date.now()}-${idx}`, mastered: false }));
       
-      // 2. Phân chia Từ vựng (Chuẩn bị nạp vào Script 2)
       const extractedWords: Flashcard[] = [];
       newSentences.forEach(s => {
         s.words?.forEach(w => {
@@ -60,18 +56,16 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
       if (extractedWords.length > 0) {
         const localManualRaw = localStorage.getItem(`manual_words_${currentUser}`);
         const currentManualWords: Flashcard[] = localManualRaw ? JSON.parse(localManualRaw) : [];
-        
-        // CHÈN LÊN ĐẦU danh sách từ vựng hiện tại
         const existingTexts = new Set(currentManualWords.map(m => m.word));
         const trulyNewWords = extractedWords.filter(w => !existingTexts.has(w.word));
         
+        // CHÈN LÊN ĐẦU (PREPEND)
         const updatedManualWords = [...trulyNewWords, ...currentManualWords];
         localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManualWords));
       }
 
-      // Lưu bài học mới
       saveAndNotify([...newSentences, ...sentences]);
-      alert(`Đã nạp bài đọc và ${extractedWords.length} từ vựng mới lên đầu danh sách.`);
+      alert(`Đã nạp bài đọc và ${extractedWords.length} từ vựng mới vào danh sách.`);
     } catch (err) { alert("Lỗi quét ảnh AI."); } finally { 
       setLoading(false); 
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -103,7 +97,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
 
       <div className="bg-slate-50 p-5 rounded-[28px] mb-6 border border-slate-100 flex flex-col gap-3">
         <div className="flex justify-between items-center">
-          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Tốc độ đọc: {playbackSpeed}x</span>
+          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Tốc độ: {playbackSpeed}x</span>
           <div className="flex gap-1">
             {[0.8, 1.0, 1.2].map(s => (
               <button key={s} onClick={() => setPlaybackSpeed(s)} className={`px-2.5 py-1 rounded-lg text-[9px] font-black transition-all ${playbackSpeed === s ? 'bg-blue-600 text-white' : 'bg-white text-slate-400 border border-slate-100'}`}>{s}x</button>
@@ -112,27 +106,27 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
         </div>
         <input type="range" min="0.5" max="2.0" step="0.1" value={playbackSpeed} onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))} className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"/>
         <div className="flex items-center justify-between pt-2 border-t border-slate-200">
-            <span className="text-[8px] font-bold text-slate-400 uppercase">iOS Background:</span>
+            <span className="text-[8px] font-bold text-slate-400 uppercase">Passive Listen:</span>
             <button onClick={handleToggleBackground} className={`px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${isBackgroundAudio ? 'bg-indigo-500 text-white' : 'bg-slate-200 text-slate-500'}`}>{isBackgroundAudio ? 'BẬT' : 'TẮT'}</button>
         </div>
       </div>
 
       <div className="flex gap-2 mb-8 bg-slate-100 p-1 rounded-2xl">
         <button onClick={() => setShowMastered(false)} className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all ${!showMastered ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400'}`}>ĐANG HỌC ({sentences.filter(s => !s.mastered).length})</button>
-        <button onClick={() => setShowMastered(true)} className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all ${showMastered ? 'bg-white shadow-sm text-green-600' : 'text-slate-400'}`}>ĐÃ THUỘC ({sentences.filter(s => s.mastered).length})</button>
+        <button onClick={() => setShowMastered(true)} className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all ${showMastered ? 'bg-white shadow-sm text-green-600' : 'text-slate-400'}`}>THUỘC ({sentences.filter(s => s.mastered).length})</button>
       </div>
 
       <div className="space-y-12">
         {currentList.length === 0 ? (
-          <div className="py-20 text-center"><p className="text-slate-300 font-black text-[10px] uppercase tracking-widest italic">Chưa có nội dung bài học</p></div>
+          <div className="py-20 text-center"><p className="text-slate-300 font-black text-[10px] uppercase tracking-widest italic">Chưa có bài học</p></div>
         ) : currentList.map((s, idx) => (
-          <div key={s.id} className="relative animate-in fade-in slide-in-from-bottom-2">
+          <div key={s.id} className="relative">
             <div className="flex justify-between items-center mb-5">
                <span className="bg-slate-900 text-white px-4 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest shadow-md">BÀI {idx + 1}</span>
                <div className="flex gap-2">
-                 <button onClick={() => deleteLesson(s.id)} className="w-9 h-9 flex items-center justify-center bg-rose-50 text-rose-500 rounded-xl active:scale-90 transition-transform"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
-                 <button onClick={() => speakText(s.chinese, 'cn', playbackSpeed)} className="w-9 h-9 flex items-center justify-center bg-blue-100 text-blue-600 rounded-xl active:scale-90 transition-transform"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg></button>
-                 <button onClick={() => toggleMastered(s.id)} className={`w-9 h-9 flex items-center justify-center rounded-xl transition-colors ${s.mastered ? 'bg-green-500 text-white' : 'bg-emerald-50 text-emerald-500'}`}><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg></button>
+                 <button onClick={() => deleteLesson(s.id)} className="w-9 h-9 flex items-center justify-center bg-rose-50 text-rose-500 rounded-xl"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
+                 <button onClick={() => speakText(s.chinese, 'cn', playbackSpeed)} className="w-9 h-9 flex items-center justify-center bg-blue-100 text-blue-600 rounded-xl"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg></button>
+                 <button onClick={() => toggleMastered(s.id)} className={`w-9 h-9 flex items-center justify-center rounded-xl ${s.mastered ? 'bg-green-500 text-white' : 'bg-emerald-50 text-emerald-500'}`}><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg></button>
                </div>
             </div>
             
@@ -162,7 +156,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
             <h3 className="text-6xl font-black mb-6 chinese-font text-slate-950 tracking-tighter">{selectedWord.text}</h3>
             <div className="flex flex-col gap-1 mb-6"><span className="text-blue-600 font-black text-xl uppercase">{selectedWord.pinyin}</span><span className="text-rose-500 font-black text-lg uppercase tracking-widest">{selectedWord.hanViet}</span></div>
             <p className="text-slate-600 text-lg font-bold mb-8 leading-tight">{selectedWord.meaning}</p>
-            <div className="flex gap-3"><button onClick={() => speakText(selectedWord.text, 'cn')} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-[10px] shadow-lg active:scale-95">NGHE PHÁT ÂM</button><button onClick={() => setSelectedWord(null)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black text-[10px]">ĐÓNG</button></div>
+            <div className="flex gap-3"><button onClick={() => speakText(selectedWord.text, 'cn')} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-[10px] shadow-lg">NGHE</button><button onClick={() => setSelectedWord(null)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black text-[10px]">ĐÓNG</button></div>
           </div>
         </div>
       )}

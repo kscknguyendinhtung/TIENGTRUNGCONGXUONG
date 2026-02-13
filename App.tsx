@@ -35,12 +35,9 @@ const App: React.FC = () => {
     setSentences(parsedReading);
     setManualCards(parsedVocab);
 
-    const uniqueWords = new Set();
-    parsedVocab.forEach((m: any) => uniqueWords.add(m.word));
     const masteredCount = Object.values(masteryData).filter(v => v === true).length;
-
     setStats({
-      vocabCount: uniqueWords.size,
+      vocabCount: parsedVocab.length,
       masteredCount: masteredCount,
       lessonsCount: parsedReading.length
     });
@@ -58,14 +55,13 @@ const App: React.FC = () => {
 
       let hasUpdate = false;
 
-      // 1. Script 1: Tải Bài học & Ngữ pháp
+      // 1. Script 1: Bài học
       if (readingRes && readingRes.reading && Array.isArray(readingRes.reading)) {
         localStorage.setItem(`reading_${user}`, JSON.stringify(readingRes.reading));
-        setSentences(readingRes.reading);
         hasUpdate = true;
       }
 
-      // 2. Script 2: Tải Từ vựng & Trạng thái thuộc (Cột E)
+      // 2. Script 2: Từ vựng & Cột E
       if (vocabRes && vocabRes.cards && Array.isArray(vocabRes.cards)) {
         const restoredCards: Flashcard[] = vocabRes.cards.map((d: any, i: number) => ({
           id: d.id || `cloud-${i}-${Date.now()}`,
@@ -74,7 +70,6 @@ const App: React.FC = () => {
         }));
         
         localStorage.setItem(`manual_words_${user}`, JSON.stringify(restoredCards));
-        setManualCards(restoredCards);
         
         const newMastery: Record<string, boolean> = {};
         restoredCards.forEach(c => { if (c.mastered) newMastery[c.word] = true; });
@@ -85,14 +80,14 @@ const App: React.FC = () => {
       if (hasUpdate) {
         loadLocalData(user);
         setSyncState('idle');
-        alert("Đã đồng bộ dữ liệu từ Cloud!");
+        alert("Đã tải dữ liệu thành công!");
       } else {
         setSyncState('idle');
-        alert("Cloud hiện tại không có dữ liệu mới.");
+        alert("Không tìm thấy dữ liệu mới.");
       }
     } catch (e) {
       setSyncState('error');
-      alert("Lỗi kết nối Cloud. Vui lòng kiểm tra Script URL.");
+      alert("Lỗi tải dữ liệu. Hãy kiểm tra Script URL.");
     }
   };
 
@@ -113,7 +108,6 @@ const App: React.FC = () => {
         vocabScriptUrl ? syncVocabData(vocabScriptUrl, user, vocabPayload) : Promise.resolve(),
         readingScriptUrl ? syncReadingData(readingScriptUrl, user, currentSentences) : Promise.resolve()
       ]);
-      
       setSyncState('idle');
     } catch (e) { 
       setSyncState('error'); 
@@ -127,18 +121,14 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (currentUser) {
-      loadLocalData(currentUser);
-    }
+    if (currentUser) loadLocalData(currentUser);
   }, [currentUser, loadLocalData]);
 
   const selectUser = async (user: string) => {
     setCurrentUser(user);
     localStorage.setItem('current_user', user);
     setActiveTab(AppTab.HOME);
-    // Tự động tải dữ liệu khi đăng nhập
-    const savedReading = localStorage.getItem(`reading_${user}`);
-    if (!savedReading) downloadFromCloud(user);
+    downloadFromCloud(user);
   };
 
   const handleDataChange = () => {
@@ -150,23 +140,23 @@ const App: React.FC = () => {
 
   if (activeTab === AppTab.USER_SELECT) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-white font-sans overflow-hidden relative">
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-white overflow-hidden relative">
         <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
           <div className="absolute top-[-10%] left-[-10%] w-[60%] h-[40%] bg-blue-600 blur-[120px] rounded-full"></div>
           <div className="absolute bottom-[-10%] right-[-10%] w-[60%] h-[40%] bg-rose-600 blur-[120px] rounded-full"></div>
         </div>
         <div className="relative z-10 text-center mb-10 w-full">
-          <div className="w-20 h-20 bg-gradient-to-tr from-blue-600 to-indigo-500 rounded-3xl mx-auto mb-6 flex items-center justify-center shadow-[0_0_50px_-12px_rgba(37,99,235,0.5)]">
+          <div className="w-20 h-20 bg-gradient-to-tr from-blue-600 to-indigo-500 rounded-3xl mx-auto mb-6 flex items-center justify-center shadow-xl">
             <span className="text-4xl font-black italic">文</span>
           </div>
-          <h1 className="text-4xl font-black tracking-tighter uppercase mb-2 text-transparent bg-clip-text bg-gradient-to-r from-white to-blue-300">Zhongwen Master</h1>
-          <p className="text-slate-500 font-black uppercase text-[9px] tracking-[0.4em]">Hệ thống Học tiếng Trung Công Xưởng</p>
+          <h1 className="text-4xl font-black tracking-tighter uppercase mb-2">Zhongwen Master</h1>
+          <p className="text-slate-500 font-black uppercase text-[9px] tracking-[0.4em]">PASSION FOR CHINESE</p>
         </div>
         <div className="grid grid-cols-2 gap-3 w-full max-w-sm relative z-10">
           {USERS.map(user => (
-            <button key={user} onClick={() => selectUser(user)} className="group bg-white/5 hover:bg-blue-600 backdrop-blur-md p-6 rounded-[32px] font-black transition-all border border-white/10 hover:border-blue-400 shadow-xl active:scale-95 text-center">
+            <button key={user} onClick={() => selectUser(user)} className="group bg-white/5 hover:bg-blue-600 backdrop-blur-md p-6 rounded-[32px] font-black transition-all border border-white/10 active:scale-95 text-center">
               <div className="text-xl mb-1">{user}</div>
-              <div className="text-[7px] opacity-40 uppercase tracking-widest font-black">Nhấn để vào</div>
+              <div className="text-[7px] opacity-40 uppercase tracking-widest font-black">LOGIN</div>
             </button>
           ))}
         </div>
@@ -176,74 +166,60 @@ const App: React.FC = () => {
 
   const renderContent = () => {
     switch (activeTab) {
-      case AppTab.VOCABULARY: 
-        return <FlashcardView currentUser={currentUser!} manualCards={manualCards} onDataChange={handleDataChange} scriptUrl={vocabScriptUrl} />;
-      case AppTab.READING: 
-        return <ReadingView currentUser={currentUser!} sentences={sentences} onDataChange={handleDataChange} />;
-      case AppTab.GRAMMAR: 
-        return <GrammarView currentUser={currentUser!} sentences={sentences} onDataChange={handleDataChange} />;
-      default:
-        return (
-          <div className="px-5 py-6 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <header className="flex justify-between items-center mt-2">
-              <div className="flex items-center gap-4">
-                <div className="relative">
-                  <div className="w-14 h-14 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-lg border border-white/10">{currentUser?.charAt(0)}</div>
-                  <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-emerald-500 border-[3px] border-slate-50 rounded-full"></div>
-                </div>
-                <div>
-                  <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-none">Chào, {currentUser}!</h1>
-                  <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mt-1">Hệ thống: {syncState === 'idle' ? 'Sẵn sàng' : 'Đang xử lý...'}</p>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => setShowSyncModal(true)} className="w-10 h-10 bg-white border border-slate-100 rounded-xl shadow-sm flex items-center justify-center text-slate-400 active:scale-90 transition-transform"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-1.065-2.572-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg></button>
-                <button onClick={() => { setCurrentUser(null); setActiveTab(AppTab.USER_SELECT); }} className="w-10 h-10 bg-rose-50 border border-rose-100 rounded-xl shadow-sm flex items-center justify-center text-rose-400 active:scale-90 transition-transform"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg></button>
-              </div>
-            </header>
-
-            <div className="grid grid-cols-3 gap-3">
-               {[{ label: 'Từ vựng', val: stats.vocabCount, color: 'rose' }, { label: 'Đã thuộc', val: stats.masteredCount, color: 'emerald' }, { label: 'Bài học', val: stats.lessonsCount, color: 'blue' }].map(s => (
-                 <div key={s.label} className="bg-white p-4 rounded-[24px] border border-slate-100 shadow-sm text-center">
-                   <div className={`text-xl font-black mb-0.5 text-${s.color}-600`}>{s.val}</div>
-                   <div className="text-[7px] font-black uppercase text-slate-400 tracking-widest">{s.label}</div>
-                 </div>
-               ))}
-            </div>
-
-            <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6 rounded-[32px] text-white shadow-xl relative overflow-hidden group">
-               <div className="absolute -top-16 -right-16 w-48 h-48 bg-blue-600/20 rounded-full blur-[60px]"></div>
-               <div className="relative z-10">
-                <div className="flex items-center gap-2.5 mb-3">
-                   <div className={`w-2 h-2 rounded-full ${syncState === 'syncing' ? 'bg-amber-400 animate-pulse' : syncState === 'pending' ? 'bg-blue-400' : syncState === 'error' ? 'bg-rose-500' : 'bg-emerald-400'}`}></div>
-                   <h3 className="text-[8px] font-black uppercase tracking-[0.3em] opacity-60">
-                    {syncState === 'syncing' ? 'ĐANG ĐỒNG BỘ...' : syncState === 'pending' ? 'CHỜ LƯU...' : syncState === 'error' ? 'LỖI KẾT NỐI' : 'HỆ THỐNG CLOUD'}
-                   </h3>
-                </div>
-                <p className="text-xl font-black leading-tight mb-6 max-w-[200px]">Dữ liệu được quản lý tách biệt giữa Bài học (Script 1) và Từ vựng (Script 2).</p>
-                <div className="flex gap-2">
-                    <button onClick={() => uploadToCloud(currentUser!)} disabled={syncState === 'syncing'} className="bg-white text-slate-900 px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 flex-1 justify-center disabled:opacity-50 uppercase">Đồng bộ lên</button>
-                    <button onClick={() => downloadFromCloud(currentUser!)} disabled={syncState === 'syncing'} className="bg-blue-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 flex-1 justify-center disabled:opacity-50 uppercase">Tải về máy</button>
-                </div>
+      case AppTab.VOCABULARY: return <FlashcardView currentUser={currentUser!} manualCards={manualCards} onDataChange={handleDataChange} scriptUrl={vocabScriptUrl} />;
+      case AppTab.READING: return <ReadingView currentUser={currentUser!} sentences={sentences} onDataChange={handleDataChange} />;
+      case AppTab.GRAMMAR: return <GrammarView currentUser={currentUser!} sentences={sentences} onDataChange={handleDataChange} />;
+      default: return (
+        <div className="px-5 py-6 space-y-6">
+          <header className="flex justify-between items-center mt-2">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-slate-900 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-lg border border-white/10">{currentUser?.charAt(0)}</div>
+              <div>
+                <h1 className="text-2xl font-black text-slate-900 tracking-tight">Chào, {currentUser}!</h1>
+                <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest">{syncState === 'idle' ? 'SẴN SÀNG' : 'ĐANG XỬ LÝ...'}</p>
               </div>
             </div>
-
-            <div className="grid gap-3 pt-1 pb-24">
-              {[{ tab: AppTab.VOCABULARY, color: 'rose', char: '字', title: 'Học Từ Vựng', sub: 'Flashcards & Mastery' }, { tab: AppTab.GRAMMAR, color: 'emerald', char: '法', title: 'Học Ngữ Pháp', sub: 'Grammar AI Analysis' }, { tab: AppTab.READING, color: 'blue', char: '阅', title: 'Luyện Đọc AI', sub: 'OCR & Translation' }].map(item => (
-                <button key={item.tab} onClick={() => setActiveTab(item.tab)} className="bg-white p-5 rounded-[32px] border border-slate-100 flex items-center justify-between group transition-all shadow-sm active:scale-[0.98] text-left">
-                  <div className="flex items-center gap-5">
-                    <div className={`w-16 h-16 bg-slate-50 text-slate-300 rounded-[20px] flex items-center justify-center text-3xl font-black group-hover:bg-${item.color}-600 group-hover:text-white transition-all`}>{item.char}</div>
-                    <div>
-                      <h2 className="text-xl font-black text-slate-900 tracking-tighter mb-0.5">{item.title}</h2>
-                      <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest">{item.sub}</p>
-                    </div>
-                  </div>
-                  <div className="w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center text-slate-300"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg></div>
-                </button>
-              ))}
+            <div className="flex gap-2">
+              <button onClick={() => setShowSyncModal(true)} className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-1.065-2.572-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg></button>
+              <button onClick={() => { setCurrentUser(null); setActiveTab(AppTab.USER_SELECT); }} className="w-10 h-10 bg-rose-50 border border-rose-100 rounded-xl flex items-center justify-center text-rose-400"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg></button>
             </div>
+          </header>
+
+          <div className="grid grid-cols-3 gap-3">
+             {[{ label: 'Từ vựng', val: stats.vocabCount, color: 'rose' }, { label: 'Đã thuộc', val: stats.masteredCount, color: 'emerald' }, { label: 'Bài học', val: stats.lessonsCount, color: 'blue' }].map(s => (
+               <div key={s.label} className="bg-white p-4 rounded-[24px] border border-slate-100 shadow-sm text-center">
+                 <div className={`text-xl font-black mb-0.5 text-${s.color}-600`}>{s.val}</div>
+                 <div className="text-[7px] font-black uppercase text-slate-400 tracking-widest">{s.label}</div>
+               </div>
+             ))}
           </div>
-        );
+
+          <div className="bg-slate-900 p-6 rounded-[32px] text-white shadow-xl relative overflow-hidden">
+             <div className="relative z-10">
+                <p className="text-xl font-black leading-tight mb-6">Đồng bộ dữ liệu của bạn với Cloud ngay.</p>
+                <div className="flex gap-2">
+                    <button onClick={() => uploadToCloud(currentUser!)} className="bg-white text-slate-900 px-6 py-4 rounded-2xl font-black text-[10px] flex-1 justify-center uppercase">Lưu lên</button>
+                    <button onClick={() => downloadFromCloud(currentUser!)} className="bg-blue-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] flex-1 justify-center uppercase">Tải về</button>
+                </div>
+              </div>
+          </div>
+
+          <div className="grid gap-3 pt-1 pb-24">
+            {[{ tab: AppTab.VOCABULARY, color: 'rose', char: '字', title: 'Học Từ Vựng', sub: 'Flashcards & Mastery' }, { tab: AppTab.GRAMMAR, color: 'emerald', char: '法', title: 'Học Ngữ Pháp', sub: 'Grammar AI Analysis' }, { tab: AppTab.READING, color: 'blue', char: '阅', title: 'Luyện Đọc AI', sub: 'OCR & Auto Prepend' }].map(item => (
+              <button key={item.tab} onClick={() => setActiveTab(item.tab)} className="bg-white p-5 rounded-[32px] border border-slate-100 flex items-center justify-between shadow-sm active:scale-[0.98] text-left">
+                <div className="flex items-center gap-5">
+                  <div className={`w-16 h-16 bg-slate-50 rounded-[20px] flex items-center justify-center text-3xl font-black text-slate-300`}>{item.char}</div>
+                  <div>
+                    <h2 className="text-xl font-black text-slate-900 tracking-tighter mb-0.5">{item.title}</h2>
+                    <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest">{item.sub}</p>
+                  </div>
+                </div>
+                <div className="w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center text-slate-300"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg></div>
+              </button>
+            ))}
+          </div>
+        </div>
+      );
     }
   };
 
@@ -253,29 +229,29 @@ const App: React.FC = () => {
       
       {showSyncModal && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl flex items-center justify-center p-6 z-[100]">
-          <div className="bg-white w-full max-w-sm p-8 rounded-[40px] shadow-2xl overflow-y-auto max-h-[90vh]">
-            <h2 className="text-2xl font-black mb-1 text-slate-900 tracking-tighter uppercase">Cấu hình Cloud</h2>
+          <div className="bg-white w-full max-w-sm p-8 rounded-[40px] shadow-2xl">
+            <h2 className="text-2xl font-black mb-1 text-slate-900 tracking-tighter uppercase">Cấu hình Script</h2>
             <div className="space-y-6 mt-6">
               <div>
-                <label className="text-[9px] font-black text-blue-500 uppercase tracking-widest ml-1 mb-2 block">Script 1 (Bài học & Ngữ pháp)</label>
-                <input type="text" value={readingScriptUrl} onChange={(e) => { setReadingScriptUrl(e.target.value); localStorage.setItem('reading_script_url', e.target.value); }} className="w-full px-5 py-4 bg-blue-50 border border-blue-100 rounded-2xl outline-none font-bold text-xs" />
+                <label className="text-[9px] font-black text-blue-500 uppercase tracking-widest block mb-2">Script 1 (Bài học)</label>
+                <input type="text" value={readingScriptUrl} onChange={(e) => { setReadingScriptUrl(e.target.value); localStorage.setItem('reading_script_url', e.target.value); }} className="w-full px-5 py-4 bg-blue-50 rounded-2xl outline-none font-bold text-xs" />
               </div>
               <div>
-                <label className="text-[9px] font-black text-rose-500 uppercase tracking-widest ml-1 mb-2 block">Script 2 (Từ vựng & Trạng thái thuộc)</label>
-                <input type="text" value={vocabScriptUrl} onChange={(e) => { setVocabScriptUrl(e.target.value); localStorage.setItem('vocab_script_url', e.target.value); }} className="w-full px-5 py-4 bg-rose-50 border border-rose-100 rounded-2xl outline-none font-bold text-xs" />
+                <label className="text-[9px] font-black text-rose-500 uppercase tracking-widest block mb-2">Script 2 (Từ vựng)</label>
+                <input type="text" value={vocabScriptUrl} onChange={(e) => { setVocabScriptUrl(e.target.value); localStorage.setItem('vocab_script_url', e.target.value); }} className="w-full px-5 py-4 bg-rose-50 rounded-2xl outline-none font-bold text-xs" />
               </div>
             </div>
-            <button onClick={() => setShowSyncModal(false)} className="w-full mt-8 py-5 bg-slate-900 text-white rounded-2xl font-black text-[10px] tracking-widest shadow-lg active:scale-95 transition-all uppercase">Lưu cấu hình</button>
+            <button onClick={() => setShowSyncModal(false)} className="w-full mt-8 py-5 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase">Lưu</button>
           </div>
         </div>
       )}
 
       {activeTab !== AppTab.USER_SELECT && (
-        <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-slate-100 py-3 px-6 flex justify-around max-w-lg mx-auto z-40 rounded-t-[40px] shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)]">
-          {[{ tab: AppTab.HOME, icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', label: 'Home' }, { tab: AppTab.VOCABULARY, icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10', label: 'Học Từ' }, { tab: AppTab.GRAMMAR, icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01', label: 'Ngữ Pháp' }, { tab: AppTab.READING, icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253', label: 'Quét AI' }].map(item => (
-            <button key={item.tab} onClick={() => setActiveTab(item.tab)} className={`flex flex-col items-center transition-all duration-300 ${activeTab === item.tab ? 'text-blue-600' : 'text-slate-300'}`}>
-              <div className={`p-2.5 rounded-2xl transition-all ${activeTab === item.tab ? 'bg-blue-50' : 'bg-transparent'}`}><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d={item.icon}/></svg></div>
-              <span className={`text-[8px] font-black mt-0.5 uppercase tracking-widest transition-opacity ${activeTab === item.tab ? 'opacity-100' : 'opacity-0'}`}>{item.label}</span>
+        <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-slate-100 py-3 px-6 flex justify-around max-w-lg mx-auto z-40 rounded-t-[40px] shadow-lg">
+          {[{ tab: AppTab.HOME, icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', label: 'Home' }, { tab: AppTab.VOCABULARY, icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10', label: 'Từ vựng' }, { tab: AppTab.GRAMMAR, icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01', label: 'Ngữ Pháp' }, { tab: AppTab.READING, icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253', label: 'Quét AI' }].map(item => (
+            <button key={item.tab} onClick={() => setActiveTab(item.tab)} className={`flex flex-col items-center ${activeTab === item.tab ? 'text-blue-600' : 'text-slate-300'}`}>
+              <div className={`p-2.5 rounded-2xl ${activeTab === item.tab ? 'bg-blue-50' : ''}`}><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d={item.icon}/></svg></div>
+              <span className="text-[8px] font-black mt-0.5 uppercase tracking-widest">{item.label}</span>
             </button>
           ))}
         </nav>

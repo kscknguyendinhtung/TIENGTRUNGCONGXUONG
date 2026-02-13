@@ -1,7 +1,7 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Flashcard, SentenceAnalysis } from '../types';
-import { speakText, extractVocabulary, fetchPublicSheetCsv, syncVocabData, toggleBackgroundMode } from '../services/geminiService';
+// Fixed: Removed fetchPublicSheetCsv as it is not exported from geminiService
+import { speakText, extractVocabulary, syncVocabData, toggleBackgroundMode } from '../services/geminiService';
 
 interface FlashcardViewProps { 
   currentUser: string; 
