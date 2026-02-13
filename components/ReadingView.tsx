@@ -127,11 +127,11 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
               <h4 className="text-[8px] font-black text-blue-400 uppercase tracking-widest mb-4">TỪ VỰNG</h4>
               <div className="flex flex-wrap gap-x-4 gap-y-7 items-end">
                 {s.words.map((w, wIdx) => (
-                  <div key={wIdx} className="flex flex-col items-center cursor-pointer active:opacity-60 text-center max-w-[90px]" onClick={() => setSelectedWord(w)}>
+                  <div key={wIdx} className="flex flex-col items-center cursor-pointer active:opacity-60 text-center max-w-[95px]" onClick={() => setSelectedWord(w)}>
                     <span className="text-[8px] font-black text-blue-400 uppercase mb-0.5">{w.pinyin}</span>
                     <span className="text-2xl font-black text-slate-950 chinese-font leading-none">{w.text}</span>
-                    <span className="text-[8px] font-black text-rose-500 uppercase mt-1 tracking-tighter leading-none">{w.hanViet}</span>
-                    <span className="text-[7px] font-bold text-slate-600 uppercase mt-0.5 tracking-tight line-clamp-1">{w.meaning}</span>
+                    <span className="text-[9px] font-black text-rose-500 uppercase mt-1 tracking-tighter leading-none">{w.hanViet}</span>
+                    <span className="text-[8px] font-bold text-emerald-600 uppercase mt-1 tracking-tight line-clamp-2 min-h-[16px] leading-tight">{w.meaning}</span>
                   </div>
                 ))}
               </div>

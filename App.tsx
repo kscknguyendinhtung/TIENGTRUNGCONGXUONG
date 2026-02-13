@@ -15,7 +15,7 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<string | null>(localStorage.getItem('current_user'));
   const [showSyncModal, setShowSyncModal] = useState(false);
   
-  // State quản lý dữ liệu tập trung để đồng bộ tức thì
+  // State quản lý dữ liệu tập trung
   const [sentences, setSentences] = useState<SentenceAnalysis[]>([]);
   const [manualCards, setManualCards] = useState<Flashcard[]>([]);
 
@@ -30,7 +30,7 @@ const App: React.FC = () => {
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [stats, setStats] = useState({ vocabCount: 0, masteredCount: 0, lessonsCount: 0 });
 
-  // 1. Tải dữ liệu từ LocalStorage lên State
+  // Load dữ liệu từ LocalStorage vào State
   const loadLocalData = useCallback((user: string) => {
     const savedReading = localStorage.getItem(`reading_${user}`);
     const savedVocab = localStorage.getItem(`manual_words_${user}`);
@@ -50,28 +50,29 @@ const App: React.FC = () => {
     setStats({ vocabCount: uniqueWords.size, masteredCount: masteredCount, lessonsCount: parsedReading.length });
   }, []);
 
-  // 2. HÀNH ĐỘNG TẢI VỀ (MANUAL DOWNLOAD)
-  const loadCloudData = async (user: string) => {
+  // ACTION 1: TẢI VỀ MÁY (1 CHIỀU - TỪ CLOUD VỀ MÁY)
+  const downloadFromCloud = async (user: string) => {
     if (syncState === 'syncing') return;
     setSyncState('syncing');
     
     try {
       // Tải song song từ 2 Script
+      // Script 1: Reading/Grammar, Script 2: Vocab/Mastery
       const [readingRes, vocabRes] = await Promise.all([
         fetchFromScript(readingScriptUrl, user),
         fetchFromScript(vocabScriptUrl, user)
       ]);
 
-      let updated = false;
+      let updatedReading = false;
+      let updatedVocab = false;
 
-      // Xử lý Script 1 (Reading/Grammar)
+      // Xử lý dữ liệu từ Script 1 (Reading & Grammar)
       if (readingRes && readingRes.reading && Array.isArray(readingRes.reading)) {
         localStorage.setItem(`reading_${user}`, JSON.stringify(readingRes.reading));
-        setSentences([...readingRes.reading]);
-        updated = true;
+        updatedReading = true;
       }
 
-      // Xử lý Script 2 (Vocabulary/Mastery)
+      // Xử lý dữ liệu từ Script 2 (Vocab)
       if (vocabRes && vocabRes.cards && Array.isArray(vocabRes.cards)) {
         const restoredCards: Flashcard[] = vocabRes.cards.map((d: any, i: number) => ({
           id: `cloud-${i}-${Date.now()}`,
@@ -80,30 +81,30 @@ const App: React.FC = () => {
         }));
         
         localStorage.setItem(`manual_words_${user}`, JSON.stringify(restoredCards));
-        setManualCards([...restoredCards]);
         
         const newMastery: Record<string, boolean> = {};
         restoredCards.forEach(c => { if (c.mastered) newMastery[c.word] = true; });
         localStorage.setItem(`mastery_${user}`, JSON.stringify(newMastery));
-        updated = true;
+        updatedVocab = true;
       }
 
-      if (updated) {
+      if (updatedReading || updatedVocab) {
         loadLocalData(user);
         setSyncState('idle');
-        alert("Đã tải dữ liệu mới nhất từ Cloud!");
+        alert("Đã tải dữ liệu từ Cloud về máy thành công!");
       } else {
-        // Fallback về Sheet nếu Script 2 trống
+        // Fallback tải từ Google Sheet nếu Script trống
         if (sheetUrl) {
             await triggerCloudRestoreFromSheet(user);
         } else {
             setSyncState('idle');
-            alert("Không tìm thấy dữ liệu trên Cloud.");
+            alert("Không tìm thấy dữ liệu trên Cloud để tải về.");
         }
       }
     } catch (e) {
-      console.error("Lỗi khi tải dữ liệu:", e);
+      console.error("Lỗi tải dữ liệu:", e);
       setSyncState('error');
+      alert("Lỗi khi kết nối với Cloud.");
     }
   };
 
@@ -115,42 +116,45 @@ const App: React.FC = () => {
           id: `csv-${i}`, word: d.word, pinyin: d.pinyin, hanViet: d.hanViet, meaning: d.meaning, category: d.category, mastered: d.mastered, isManual: true
         }));
         localStorage.setItem(`manual_words_${user}`, JSON.stringify(restoredCards));
-        setManualCards([...restoredCards]);
         const newMastery: Record<string, boolean> = {};
         restoredCards.forEach(c => { if (c.mastered) newMastery[c.word] = true; });
         localStorage.setItem(`mastery_${user}`, JSON.stringify(newMastery));
         loadLocalData(user);
-        alert(`Đã tải ${restoredCards.length} từ vựng từ Sheet.`);
+        alert(`Đã tải ${restoredCards.length} từ vựng từ Sheet về máy.`);
       }
       setSyncState('idle');
     } catch(e) { setSyncState('error'); }
   };
 
-  // 3. HÀNH ĐỘNG ĐỒNG BỘ LÊN (MANUAL/DEBOUNCED SYNC)
-  const triggerCloudBackup = useCallback((user: string) => {
+  // ACTION 2: ĐỒNG BỘ LÊN (ĐẨY TỪ MÁY LÊN CLOUD)
+  const uploadToCloud = async (user: string) => {
+    setSyncState('syncing');
+    try {
+      const currentSentences = JSON.parse(localStorage.getItem(`reading_${user}`) || '[]');
+      const currentManual = JSON.parse(localStorage.getItem(`manual_words_${user}`) || '[]');
+      const currentMastery = JSON.parse(localStorage.getItem(`mastery_${user}`) || '{}');
+      const vocabPayload = currentManual.map((c: Flashcard) => ({ ...c, mastered: !!currentMastery[c.word] }));
+
+      await Promise.all([
+        vocabScriptUrl ? syncVocabData(vocabScriptUrl, user, vocabPayload) : Promise.resolve(),
+        readingScriptUrl ? syncReadingData(readingScriptUrl, user, currentSentences) : Promise.resolve()
+      ]);
+      
+      setSyncState('idle');
+      alert("Đã đồng bộ dữ liệu từ máy lên Cloud thành công!");
+    } catch (e) { 
+      setSyncState('error'); 
+      alert("Lỗi khi đồng bộ lên Cloud.");
+    }
+  };
+
+  const triggerCloudBackupDebounced = useCallback((user: string) => {
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     setSyncState('pending');
+    syncTimeoutRef.current = setTimeout(() => uploadToCloud(user), 5000); // Tự động đồng bộ lên sau 5s nếu có thay đổi
+  }, []);
 
-    syncTimeoutRef.current = setTimeout(async () => {
-      setSyncState('syncing');
-      try {
-        const currentSentences = JSON.parse(localStorage.getItem(`reading_${user}`) || '[]');
-        const currentManual = JSON.parse(localStorage.getItem(`manual_words_${user}`) || '[]');
-        const currentMastery = JSON.parse(localStorage.getItem(`mastery_${user}`) || '{}');
-        const vocabPayload = currentManual.map((c: Flashcard) => ({ ...c, mastered: !!currentMastery[c.word] }));
-
-        await Promise.all([
-          vocabScriptUrl ? syncVocabData(vocabScriptUrl, user, vocabPayload) : Promise.resolve(),
-          readingScriptUrl ? syncReadingData(readingScriptUrl, user, currentSentences) : Promise.resolve()
-        ]);
-        
-        setSyncState('idle');
-        loadLocalData(user);
-      } catch (e) { setSyncState('error'); }
-    }, 2000);
-  }, [vocabScriptUrl, readingScriptUrl, loadLocalData]);
-
-  // Chỉ load dữ liệu local khi đổi user, KHÔNG tự động pull từ cloud
+  // Chỉ load dữ liệu local khi mở app/đổi user
   useEffect(() => {
     if (currentUser) {
       loadLocalData(currentUser);
@@ -166,7 +170,7 @@ const App: React.FC = () => {
   const handleDataChange = () => {
     if (currentUser) {
       loadLocalData(currentUser);
-      triggerCloudBackup(currentUser);
+      triggerCloudBackupDebounced(currentUser);
     }
   };
 
@@ -215,7 +219,7 @@ const App: React.FC = () => {
                 </div>
                 <div>
                   <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-none">Chào, {currentUser}!</h1>
-                  <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mt-1">Hệ thống: {syncState === 'idle' ? 'Sẵn sàng' : 'Đang xử lý'}</p>
+                  <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mt-1">Trạng thái: {syncState === 'idle' ? 'Sẵn sàng' : 'Đang xử lý...'}</p>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -238,12 +242,14 @@ const App: React.FC = () => {
                <div className="relative z-10">
                 <div className="flex items-center gap-2.5 mb-3">
                    <div className={`w-2 h-2 rounded-full ${syncState === 'syncing' ? 'bg-amber-400 animate-pulse' : syncState === 'pending' ? 'bg-blue-400' : syncState === 'error' ? 'bg-rose-500' : 'bg-emerald-400'}`}></div>
-                   <h3 className="text-[8px] font-black uppercase tracking-[0.3em] opacity-60">{syncState === 'syncing' ? 'ĐANG TẢI...' : syncState === 'pending' ? 'CHỜ LƯU...' : syncState === 'error' ? 'LỖI ĐỒNG BỘ' : 'BẤM TẢI VỀ ĐỂ BẮT ĐẦU'}</h3>
+                   <h3 className="text-[8px] font-black uppercase tracking-[0.3em] opacity-60">
+                    {syncState === 'syncing' ? 'ĐANG ĐỒNG BỘ...' : syncState === 'pending' ? 'CHỜ LƯU...' : syncState === 'error' ? 'LỖI KẾT NỐI' : 'HỆ THỐNG CLOUD'}
+                   </h3>
                 </div>
-                <p className="text-xl font-black leading-tight mb-6 max-w-[200px]">Hãy bấm "Tải về" để lấy dữ liệu từ Google Sheets trước khi học.</p>
+                <p className="text-xl font-black leading-tight mb-6 max-w-[200px]">Tải dữ liệu từ Sheet về máy để bắt đầu học tập.</p>
                 <div className="flex gap-2">
-                    <button onClick={() => triggerCloudBackup(currentUser!)} disabled={syncState === 'syncing'} className="bg-white text-slate-900 px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 flex-1 justify-center disabled:opacity-50 uppercase">Đồng bộ lên</button>
-                    <button onClick={() => loadCloudData(currentUser!)} disabled={syncState === 'syncing'} className="bg-blue-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 flex-1 justify-center disabled:opacity-50 uppercase">Tải về máy</button>
+                    <button onClick={() => uploadToCloud(currentUser!)} disabled={syncState === 'syncing'} className="bg-white text-slate-900 px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 flex-1 justify-center disabled:opacity-50 uppercase">Đồng bộ lên</button>
+                    <button onClick={() => downloadFromCloud(currentUser!)} disabled={syncState === 'syncing'} className="bg-blue-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 flex-1 justify-center disabled:opacity-50 uppercase">Tải về máy</button>
                 </div>
               </div>
             </div>
