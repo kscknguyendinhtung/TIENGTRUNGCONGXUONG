@@ -2,7 +2,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { SentenceAnalysis, Flashcard, MindmapCategory } from "../types";
 
-// Initialize Gemini API client following the provided guidelines
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // --- BACKGROUND AUDIO HACK FOR IOS ---
@@ -89,6 +88,7 @@ export const syncVocabData = async (scriptUrl: string, user: string, cards: Flas
     }))
   };
   try {
+    // Backend Script 2 should use the 'user' field to open the matching sheet
     await fetch(scriptUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
     return true;
   } catch (e) { console.error("Vocab Sync Error", e); return false; }
@@ -132,19 +132,15 @@ export const extractVocabulary = async (input: { text?: string, imageBase64?: st
   const parts: any[] = [];
   if (input.imageBase64) {
     parts.push({ inlineData: { data: input.imageBase64, mimeType: 'image/jpeg' } });
-    parts.push({ text: "OCR hình ảnh này và trích xuất toàn bộ từ vựng tiếng Trung quan trọng." });
+    parts.push({ text: "OCR và phân tích từ vựng tiếng Trung." });
   } else if (input.text) {
-    parts.push({ text: `Phân tích danh sách từ vựng này: \n${input.text}` });
+    parts.push({ text: `Phân tích từ vựng: \n${input.text}` });
   }
   parts.push({
     text: `
-    NHIỆM VỤ: Chuyển đổi dữ liệu đầu vào thành danh sách từ vựng JSON chuẩn.
-    YÊU CẦU ĐẦU RA CHO MỖI TỪ (JSON Object):
-    - text: Chữ Hán (Giản thể).
-    - pinyin: Pinyin chuẩn có dấu thanh.
-    - hanViet: Âm Hán Việt.
-    - meaning: Nghĩa tiếng Việt ngắn gọn, súc tích.
-    - category: BẮT BUỘC phân loại vào 1 trong các nhóm sau: "Danh từ", "Động từ", "Tính từ", "Mẫu câu", "Sản xuất", "Chất lượng", "Nhân sự", "Văn phòng", "Khác".
+    NHIỆM VỤ: Trả về JSON Array từ vựng.
+    DANH MỤC (BẮT BUỘC CHỌN 1): "Danh từ", "Động từ", "Tính từ", "Mẫu câu", "Sản xuất", "Chất lượng", "Nhân sự", "Văn phòng", "Khác".
+    JSON OBJECT: { text, pinyin, meaning, hanViet, category }
     `
   });
   const response = await ai.models.generateContent({
@@ -156,7 +152,13 @@ export const extractVocabulary = async (input: { text?: string, imageBase64?: st
         type: Type.ARRAY,
         items: {
           type: Type.OBJECT,
-          properties: { text: { type: Type.STRING }, pinyin: { type: Type.STRING }, meaning: { type: Type.STRING }, hanViet: { type: Type.STRING }, category: { type: Type.STRING } }
+          properties: { 
+            text: { type: Type.STRING }, 
+            pinyin: { type: Type.STRING }, 
+            meaning: { type: Type.STRING }, 
+            hanViet: { type: Type.STRING }, 
+            category: { type: Type.STRING } 
+          }
         }
       }
     }
@@ -164,7 +166,7 @@ export const extractVocabulary = async (input: { text?: string, imageBase64?: st
   try {
     const jsonStr = cleanJsonString(response.text || "[]");
     return JSON.parse(jsonStr);
-  } catch (e) { console.error("Lỗi parse từ vựng:", e); return []; }
+  } catch (e) { return []; }
 };
 
 export const analyzeImageAndExtractText = async (base64Images: string[]): Promise<SentenceAnalysis[]> => {
@@ -172,8 +174,8 @@ export const analyzeImageAndExtractText = async (base64Images: string[]): Promis
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview', 
     contents: { parts: [...imageParts, { 
-      text: `NHIỆM VỤ: OCR tiếng Trung và phân tích từ vựng/ngữ pháp chi tiết. 
-      Yêu cầu BẮT BUỘC phân loại từ vựng vào 1 trong các danh mục: "Danh từ", "Động từ", "Tính từ", "Mẫu câu", "Sản xuất", "Chất lượng", "Nhân sự", "Văn phòng", "Khác".` 
+      text: `NHIỆM VỤ: OCR tiếng Trung và phân tích từ vựng. 
+      DANH MỤC CHO TỪ VỰNG (BẮT BUỘC CHỌN 1 TRONG): "Danh từ", "Động từ", "Tính từ", "Mẫu câu", "Sản xuất", "Chất lượng", "Nhân sự", "Văn phòng", "Khác".` 
     }] },
     config: {
       responseMimeType: "application/json",
@@ -207,19 +209,8 @@ export const analyzeImageAndExtractText = async (base64Images: string[]): Promis
   } catch (e) { return []; }
 };
 
-// Generate AI-categorized mindmap from list of words for structured learning
 export const generateMindmap = async (words: { text: string, pinyin: string, meaning: string, hanViet: string }[]): Promise<MindmapCategory[]> => {
-  const prompt = `
-    NHIỆM VỤ: Phân tích và sắp xếp danh sách từ vựng tiếng Trung sau đây vào các nhóm logic (Mindmap) để người học dễ ghi nhớ nhất.
-    YÊU CẦU:
-    - Phân nhóm theo các danh mục: "Danh từ", "Động từ", "Tính từ", "Mẫu câu", "Sản xuất", "Chất lượng", "Nhân sự", "Văn phòng", "Khác".
-    - Trả về kết quả dưới dạng JSON Array các đối tượng Category.
-    - Đảm bảo trích xuất chính xác các trường: text, pinyin, meaning, hanViet từ dữ liệu đầu vào.
-
-    Dữ liệu từ vựng:
-    ${JSON.stringify(words)}
-  `;
-
+  const prompt = `Phân loại danh sách từ vựng này vào các nhóm: "Danh từ", "Động từ", "Tính từ", "Mẫu câu", "Sản xuất", "Chất lượng", "Nhân sự", "Văn phòng", "Khác". \n ${JSON.stringify(words)}`;
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: prompt,
@@ -230,17 +221,12 @@ export const generateMindmap = async (words: { text: string, pinyin: string, mea
         items: {
           type: Type.OBJECT,
           properties: {
-            name: { type: Type.STRING, description: "Tên nhóm chủ đề hoặc từ loại" },
+            name: { type: Type.STRING },
             words: {
               type: Type.ARRAY,
               items: {
                 type: Type.OBJECT,
-                properties: {
-                  text: { type: Type.STRING },
-                  pinyin: { type: Type.STRING },
-                  meaning: { type: Type.STRING },
-                  hanViet: { type: Type.STRING }
-                }
+                properties: { text: { type: Type.STRING }, pinyin: { type: Type.STRING }, meaning: { type: Type.STRING }, hanViet: { type: Type.STRING } }
               }
             }
           }
@@ -248,14 +234,10 @@ export const generateMindmap = async (words: { text: string, pinyin: string, mea
       }
     }
   });
-
   try {
     const jsonStr = cleanJsonString(response.text || "[]");
     return JSON.parse(jsonStr);
-  } catch (e) {
-    console.error("Lỗi parse Mindmap:", e);
-    return [];
-  }
+  } catch (e) { return []; }
 };
 
 const activeUtterances: SpeechSynthesisUtterance[] = [];

@@ -14,7 +14,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
   const [selectedWord, setSelectedWord] = useState<any>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState(0.8);
   const [showMastered, setShowMastered] = useState(false);
-  const [isBackgroundAudio, setIsBackgroundAudio] = useState(false); // New State
+  const [isBackgroundAudio, setIsBackgroundAudio] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -22,7 +22,6 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Đảm bảo tất cả item đều có ID hợp lệ
         const withIds = parsed.map((s: any, idx: number) => ({
           ...s,
           id: s.id || `read-${idx}-${Date.now()}`
@@ -38,7 +37,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
 
   const saveAndNotify = (data: SentenceAnalysis[]) => {
     localStorage.setItem(`reading_${currentUser}`, JSON.stringify(data));
-    setSentences([...data]); // Force re-render with fresh array copy
+    setSentences([...data]);
     if (onDataChange) onDataChange();
   };
 
@@ -64,14 +63,12 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
     try {
       const result = await analyzeImageAndExtractText(base64Images);
       
-      // 1. Process Sentences for Reading List
       const newSentences = result.map((s, idx) => ({ 
         ...s, 
         id: `read-${Date.now()}-${idx}-${Math.floor(Math.random() * 10000)}`, 
         mastered: false 
       }));
       
-      // 2. Extract Words and PREPEND to Manual Vocab List (Script 2)
       const extractedWords: Flashcard[] = [];
       newSentences.forEach(s => {
         s.words?.forEach(w => {
@@ -81,7 +78,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
             pinyin: w.pinyin,
             hanViet: w.hanViet,
             meaning: w.meaning,
-            category: w.category || 'Khác',
+            category: w.category || 'Khác', // Category assigned by AI
             isManual: true,
             mastered: false
           });
@@ -92,21 +89,21 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
         const localManualRaw = localStorage.getItem(`manual_words_${currentUser}`);
         const currentManualWords: Flashcard[] = localManualRaw ? JSON.parse(localManualRaw) : [];
         
-        // Remove duplicates (checking by word text)
+        // Check duplicates
         const existingTexts = new Set(currentManualWords.map(m => m.word));
         const trulyNewWords = extractedWords.filter(w => !existingTexts.has(w.word));
         
-        // Update local vocabulary list with new words at the BEGINNING (PREPEND)
-        // This ensures they appear at the top of the list and the Sheet after sync
+        // PREPEND (Insert at top) new words to the existing manual list
+        // This ensures Script 2 puts them at the top of the Google Sheet
         const updatedManualWords = [...trulyNewWords, ...currentManualWords];
         localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify(updatedManualWords));
       }
 
-      // Add to sentences (Reading AI view)
-      const updated = [...newSentences, ...sentences]; // Also prepend to reading view
+      // Also prepend to the reading view for consistency
+      const updated = [...newSentences, ...sentences]; 
       saveAndNotify(updated);
       
-      // Trigger sync immediately via onDataChange
+      // onDataChange triggers the Cloud Backup in App.tsx which handles Script 1 & 2
       if (onDataChange) onDataChange();
       
     } catch (err) {
@@ -124,7 +121,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
   };
 
   const deleteLesson = (id: string) => {
-    if (window.confirm("Bạn có chắc chắn muốn xóa bài học này? Dữ liệu sẽ biến mất vĩnh viễn.")) {
+    if (window.confirm("Xóa bài học này?")) {
       const filtered = sentences.filter(s => s.id !== id);
       saveAndNotify(filtered);
     }
@@ -152,7 +149,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
 
       <div className="bg-slate-50 p-5 rounded-[28px] mb-6 border border-slate-100 flex flex-col gap-3">
         <div className="flex justify-between items-center">
-          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Tốc độ đọc: {playbackSpeed}x</span>
+          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Tốc độ: {playbackSpeed}x</span>
           <div className="flex gap-1">
             {[0.8, 1.0, 1.2].map(s => (
               <button key={s} onClick={() => setPlaybackSpeed(s)} className={`px-2.5 py-1 rounded-lg text-[9px] font-black transition-all ${playbackSpeed === s ? 'bg-blue-600 text-white' : 'bg-white text-slate-400 border border-slate-100'}`}>{s}x</button>
@@ -164,21 +161,21 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
         <div className="flex items-center justify-between pt-2 border-t border-slate-200">
             <span className="text-[8px] font-bold text-slate-400 uppercase">Chạy ngầm (iOS):</span>
             <button onClick={handleToggleBackground} className={`px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${isBackgroundAudio ? 'bg-indigo-500 text-white' : 'bg-slate-200 text-slate-500'}`}>
-                {isBackgroundAudio ? 'ĐANG BẬT' : 'ĐÃ TẮT'}
+                {isBackgroundAudio ? 'BẬT' : 'TẮT'}
             </button>
         </div>
       </div>
 
       <div className="flex gap-2 mb-8 bg-slate-100 p-1 rounded-2xl">
         <button onClick={() => setShowMastered(false)} className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all ${!showMastered ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400'}`}>ĐANG HỌC ({sentences.filter(s => !s.mastered).length})</button>
-        <button onClick={() => setShowMastered(true)} className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all ${showMastered ? 'bg-white shadow-sm text-green-600' : 'text-slate-400'}`}>ĐÃ THUỘC ({sentences.filter(s => s.mastered).length})</button>
+        <button onClick={() => setShowMastered(true)} className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all ${showMastered ? 'bg-white shadow-sm text-green-600' : 'text-slate-400'}`}>THUỘC ({sentences.filter(s => s.mastered).length})</button>
       </div>
 
       <div className="space-y-12">
         {currentList.length === 0 ? (
           <div className="py-20 text-center">
-             <div className="text-4xl mb-4">📖</div>
-             <p className="text-slate-400 font-black text-[10px] uppercase tracking-widest">Trống</p>
+             <div className="text-4xl mb-4 text-slate-200">📖</div>
+             <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest">Trống</p>
           </div>
         ) : currentList.map((s, idx) => (
           <div key={s.id} className="relative group animate-in fade-in slide-in-from-bottom-2">
@@ -194,13 +191,14 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
             </div>
 
             <div className="mb-6">
-              <h4 className="text-[8px] font-black text-blue-400 uppercase tracking-widest mb-4">TỪ VỰNG TRONG BÀI</h4>
+              <h4 className="text-[8px] font-black text-blue-400 uppercase tracking-widest mb-4">TỪ VỰNG TRONG BÀI (TỰ ĐỘNG PHÂN LOẠI)</h4>
               <div className="flex flex-wrap gap-x-3 gap-y-6 items-end">
                 {s.words.map((w, wIdx) => (
                   <div key={wIdx} className="flex flex-col items-center cursor-pointer group active:opacity-60" onClick={() => setSelectedWord(w)}>
                     <span className="text-[8px] font-black text-blue-400 uppercase mb-0.5">{w.pinyin}</span>
                     <span className="text-2xl font-black text-slate-950 chinese-font leading-none">{w.text}</span>
                     <span className="text-[7px] font-black text-slate-300 uppercase mt-1 tracking-tighter">{w.hanViet}</span>
+                    <span className="text-[6px] font-black text-emerald-500 uppercase mt-0.5 tracking-widest">{w.category}</span>
                   </div>
                 ))}
               </div>
@@ -233,6 +231,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
             <div className="flex flex-col gap-1 mb-6">
               <span className="text-blue-600 font-black text-xl uppercase tracking-tighter">{selectedWord.pinyin}</span>
               <span className="text-rose-500 font-black text-lg uppercase tracking-widest">{selectedWord.hanViet}</span>
+              <span className="text-emerald-500 font-black text-[10px] uppercase tracking-widest">Loại: {selectedWord.category}</span>
             </div>
             <p className="text-slate-600 text-lg font-bold mb-8 leading-tight">{selectedWord.meaning}</p>
             <div className="flex gap-3">
