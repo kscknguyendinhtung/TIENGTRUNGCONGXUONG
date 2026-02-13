@@ -1,17 +1,21 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { analyzeImageAndExtractText, speakText } from '../services/geminiService';
 import { SentenceAnalysis } from '../types';
 
 interface GrammarViewProps { 
   currentUser: string;
-  sentences: SentenceAnalysis[]; // Nhận trực tiếp từ App.tsx
   onDataChange?: () => void;
 }
 
-export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser, sentences, onDataChange }) => {
+export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser, onDataChange }) => {
+  const [data, setData] = useState<SentenceAnalysis[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedWord, setSelectedWord] = useState<any>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(`reading_${currentUser}`);
+    if (saved) setData(JSON.parse(saved));
+  }, [currentUser]);
 
   const handleProcess = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -19,15 +23,22 @@ export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser, sentences
     setLoading(true);
     const base64Promises = files.map((file: File) => new Promise<string>(resolve => {
       const reader = new FileReader();
-      reader.onload = () => resolve((reader.result as string || "").split(',')[1] || "");
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve((result || "").split(',')[1] || "");
+      };
       reader.readAsDataURL(file);
     }));
     const base64Images = await Promise.all(base64Promises);
     try {
       const result = await analyzeImageAndExtractText(base64Images);
-      const withIds = result.map((s, idx) => ({ ...s, id: `grammar-${Date.now()}-${idx}`, mastered: false }));
-      
-      const updated = [...withIds, ...sentences];
+      const withIds = result.map((s, idx) => ({
+        ...s,
+        id: `grammar-${Date.now()}-${idx}`,
+        mastered: false
+      }));
+      const updated = [...data, ...withIds];
+      setData(updated);
       localStorage.setItem(`reading_${currentUser}`, JSON.stringify(updated));
       if (onDataChange) onDataChange();
     } catch (err) {
@@ -49,14 +60,14 @@ export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser, sentences
         </div>
       </div>
 
-      {sentences.length === 0 && (
+      {data.length === 0 && (
         <div className="text-center py-16 bg-emerald-50 rounded-[32px] border-2 border-dashed border-emerald-100">
-           <p className="text-emerald-300 font-black text-[10px] uppercase tracking-widest">Chưa có bài học - Hãy bấm Tải về ở Home</p>
+           <p className="text-emerald-300 font-black text-[10px] uppercase tracking-widest">Chưa có dữ liệu bài học</p>
         </div>
       )}
 
       <div className="space-y-6">
-        {sentences.map((s, idx) => (
+        {data.map((s, idx) => (
           <div key={s.id || idx} className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 border-l-[8px] border-l-emerald-500 overflow-hidden">
             <div className="mb-5 flex items-center justify-between">
               <span className="text-[8px] font-black bg-slate-900 text-white px-3 py-1 rounded-full uppercase tracking-widest">BÀI {idx + 1}</span>
@@ -64,11 +75,10 @@ export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser, sentences
 
             <div className="flex flex-wrap gap-x-4 gap-y-7 mb-8 items-end">
               {s.words.map((w, wIdx) => (
-                <div key={wIdx} className="flex flex-col items-center cursor-pointer group active:opacity-60 text-center" onClick={() => setSelectedWord(w)}>
+                <div key={wIdx} className="flex flex-col items-center cursor-pointer group active:opacity-60" onClick={() => setSelectedWord(w)}>
                   <span className="text-[8px] text-rose-500 font-black mb-1 uppercase tracking-tighter leading-none">{w.pinyin}</span>
                   <span className="text-2xl font-black chinese-font leading-none">{w.text}</span>
                   <span className="text-[8px] text-slate-300 font-bold uppercase mt-1 tracking-widest leading-none">{w.hanViet}</span>
-                  <span className="text-[7px] font-bold text-emerald-600 uppercase mt-1 tracking-tight line-clamp-1 leading-none">{w.meaning}</span>
                 </div>
               ))}
             </div>
