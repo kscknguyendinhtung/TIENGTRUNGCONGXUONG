@@ -15,7 +15,7 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<string | null>(localStorage.getItem('current_user'));
   const [showSyncModal, setShowSyncModal] = useState(false);
   
-  // Dữ liệu tập trung - Nguồn sống của App
+  // State quản lý dữ liệu tập trung (Source of Truth)
   const [sentences, setSentences] = useState<SentenceAnalysis[]>([]);
   const [manualCards, setManualCards] = useState<Flashcard[]>([]);
 
@@ -49,7 +49,7 @@ const App: React.FC = () => {
     setStats({ vocabCount: uniqueWords.size, masteredCount: masteredCount, lessonsCount: parsedReading.length });
   }, []);
 
-  // TẢI VỀ MÁY (1 CHIỀU)
+  // TẢI VỀ MÁY (1 CHIỀU - KHÔNG ĐỒNG BỘ NGƯỢC LÊN KHI TẢI)
   const downloadFromCloud = async (user: string) => {
     if (syncState === 'syncing') return;
     setSyncState('syncing');
@@ -60,18 +60,16 @@ const App: React.FC = () => {
         fetchFromScript(vocabScriptUrl, user)
       ]);
 
-      let hasNewReading = false;
-      let hasNewVocab = false;
+      let updatedAny = false;
 
-      // 1. Cập nhật Bài học & Ngữ pháp từ Script 1
+      // 1. Xử lý dữ liệu Script 1 (Reading & Grammar)
       if (readingRes && readingRes.reading && Array.isArray(readingRes.reading)) {
-        const data = readingRes.reading;
-        localStorage.setItem(`reading_${user}`, JSON.stringify(data));
-        setSentences([...data]); // Cập nhật State để UI Reading/Grammar đổi ngay
-        hasNewReading = true;
+        localStorage.setItem(`reading_${user}`, JSON.stringify(readingRes.reading));
+        setSentences([...readingRes.reading]); // Cập nhật ngay UI Reading/Grammar
+        updatedAny = true;
       }
 
-      // 2. Cập nhật Từ vựng & Tiến độ từ Script 2
+      // 2. Xử lý dữ liệu Script 2 (Vocab & Mastery Status - Cột E)
       if (vocabRes && vocabRes.cards && Array.isArray(vocabRes.cards)) {
         const restoredCards: Flashcard[] = vocabRes.cards.map((d: any, i: number) => ({
           id: d.id || `cloud-${i}-${Date.now()}`,
@@ -80,30 +78,30 @@ const App: React.FC = () => {
         }));
         
         localStorage.setItem(`manual_words_${user}`, JSON.stringify(restoredCards));
-        setManualCards([...restoredCards]);
+        setManualCards([...restoredCards]); // Cập nhật ngay UI Flashcards
         
         const newMastery: Record<string, boolean> = {};
         restoredCards.forEach(c => { if (c.mastered) newMastery[c.word] = true; });
         localStorage.setItem(`mastery_${user}`, JSON.stringify(newMastery));
-        hasNewVocab = true;
+        updatedAny = true;
       }
 
-      if (hasNewReading || hasNewVocab) {
-        loadLocalData(user); // Tính toán lại stats
+      if (updatedAny) {
+        loadLocalData(user);
         setSyncState('idle');
-        alert(`Thành công!\n- Bài học: ${hasNewReading ? 'Đã cập nhật' : 'Không có mới'}\n- Từ vựng: ${hasNewVocab ? 'Đã cập nhật' : 'Không có mới'}`);
+        alert("Đã tải dữ liệu thành công! Bài học và Từ vựng đã sẵn sàng.");
       } else {
         if (sheetUrl) {
             await triggerCloudRestoreFromSheet(user);
         } else {
             setSyncState('idle');
-            alert("Cloud không có dữ liệu bài học nào.");
+            alert("Không tìm thấy dữ liệu trên Cloud.");
         }
       }
     } catch (e) {
-      console.error("Lỗi tải bài học:", e);
+      console.error("Lỗi tải dữ liệu:", e);
       setSyncState('error');
-      alert("Lỗi kết nối Script. Vui lòng kiểm tra cấu hình URL.");
+      alert("Không thể kết nối Cloud.");
     }
   };
 
@@ -120,13 +118,12 @@ const App: React.FC = () => {
         restoredCards.forEach(c => { if (c.mastered) newMastery[c.word] = true; });
         localStorage.setItem(`mastery_${user}`, JSON.stringify(newMastery));
         loadLocalData(user);
-        alert(`Đã tải từ vựng dự phòng từ Sheet.`);
+        alert(`Đã tải từ vựng từ Sheet backup.`);
       }
       setSyncState('idle');
     } catch(e) { setSyncState('error'); }
   };
 
-  // ĐỒNG BỘ LÊN
   const uploadToCloud = async (user: string) => {
     if (syncState === 'syncing') return;
     setSyncState('syncing');
@@ -142,10 +139,10 @@ const App: React.FC = () => {
       ]);
       
       setSyncState('idle');
-      alert("Đã lưu tất cả bài học và từ vựng lên Cloud!");
+      alert("Đã đồng bộ dữ liệu lên Cloud thành công!");
     } catch (e) { 
       setSyncState('error'); 
-      alert("Lỗi khi lưu lên Cloud.");
+      alert("Lỗi đồng bộ lên.");
     }
   };
 
@@ -203,7 +200,7 @@ const App: React.FC = () => {
   const renderContent = () => {
     switch (activeTab) {
       case AppTab.VOCABULARY: 
-        return <FlashcardView currentUser={currentUser!} onDataChange={handleDataChange} sheetUrl={sheetUrl} scriptUrl={vocabScriptUrl} />;
+        return <FlashcardView currentUser={currentUser!} onDataChange={handleDataChange} sheetUrl={sheetUrl} scriptUrl={vocabScriptUrl} manualCards={manualCards} />;
       case AppTab.READING: 
         return <ReadingView currentUser={currentUser!} sentences={sentences} onDataChange={handleDataChange} />;
       case AppTab.GRAMMAR: 
@@ -243,10 +240,10 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-2.5 mb-3">
                    <div className={`w-2 h-2 rounded-full ${syncState === 'syncing' ? 'bg-amber-400 animate-pulse' : syncState === 'pending' ? 'bg-blue-400' : syncState === 'error' ? 'bg-rose-500' : 'bg-emerald-400'}`}></div>
                    <h3 className="text-[8px] font-black uppercase tracking-[0.3em] opacity-60">
-                    {syncState === 'syncing' ? 'ĐANG ĐỒNG BỘ...' : syncState === 'pending' ? 'CHỜ LƯU...' : syncState === 'error' ? 'LỖI KẾT NỐI' : 'HỆ THỐNG CLOUD'}
+                    {syncState === 'syncing' ? 'ĐANG TẢI...' : syncState === 'pending' ? 'CHỜ LƯU...' : syncState === 'error' ? 'LỖI KẾT NỐI' : 'HỆ THỐNG CLOUD'}
                    </h3>
                 </div>
-                <p className="text-xl font-black leading-tight mb-6 max-w-[200px]">Tải dữ liệu bài học về máy để bắt đầu học tập.</p>
+                <p className="text-xl font-black leading-tight mb-6 max-w-[200px]">Hãy bấm "Tải về máy" để lấy bài học mới nhất từ Cloud.</p>
                 <div className="flex gap-2">
                     <button onClick={() => uploadToCloud(currentUser!)} disabled={syncState === 'syncing'} className="bg-white text-slate-900 px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 flex-1 justify-center disabled:opacity-50 uppercase">Đồng bộ lên</button>
                     <button onClick={() => downloadFromCloud(currentUser!)} disabled={syncState === 'syncing'} className="bg-blue-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 flex-1 justify-center disabled:opacity-50 uppercase">Tải về máy</button>
@@ -280,19 +277,15 @@ const App: React.FC = () => {
       {showSyncModal && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl flex items-center justify-center p-6 z-[100]">
           <div className="bg-white w-full max-w-sm p-8 rounded-[40px] shadow-2xl overflow-y-auto max-h-[90vh]">
-            <h2 className="text-2xl font-black mb-1 text-slate-900 tracking-tighter uppercase">Cấu hình Script</h2>
+            <h2 className="text-2xl font-black mb-1 text-slate-900 tracking-tighter uppercase">Cấu hình Cloud</h2>
             <div className="space-y-6 mt-6">
               <div>
-                <label className="text-[9px] font-black text-blue-500 uppercase tracking-widest ml-1 mb-2 block">Script 1 (Nặng: Reading/Grammar)</label>
-                <input type="text" value={readingScriptUrl} onChange={(e) => { setReadingScriptUrl(e.target.value); localStorage.setItem('reading_script_url', e.target.value); }} className="w-full px-5 py-4 bg-blue-50 border border-blue-100 rounded-2xl outline-none font-bold text-xs shadow-inner" />
+                <label className="text-[9px] font-black text-blue-500 uppercase tracking-widest ml-1 mb-2 block">Script 1 (Bài học & Ngữ pháp)</label>
+                <input type="text" value={readingScriptUrl} onChange={(e) => { setReadingScriptUrl(e.target.value); localStorage.setItem('reading_script_url', e.target.value); }} className="w-full px-5 py-4 bg-blue-50 border border-blue-100 rounded-2xl outline-none font-bold text-xs" />
               </div>
               <div>
-                <label className="text-[9px] font-black text-rose-500 uppercase tracking-widest ml-1 mb-2 block">Script 2 (Nhẹ: Vocab/Mastery)</label>
-                <input type="text" value={vocabScriptUrl} onChange={(e) => { setVocabScriptUrl(e.target.value); localStorage.setItem('vocab_script_url', e.target.value); }} className="w-full px-5 py-4 bg-rose-50 border border-rose-100 rounded-2xl outline-none font-bold text-xs shadow-inner" />
-              </div>
-              <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Google Sheets CSV (Backup)</label>
-                <input type="text" value={sheetUrl} onChange={(e) => { setSheetUrl(e.target.value); localStorage.setItem(`sheet_url_${currentUser}`, e.target.value); }} className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs shadow-inner" />
+                <label className="text-[9px] font-black text-rose-500 uppercase tracking-widest ml-1 mb-2 block">Script 2 (Từ vựng & Cột E)</label>
+                <input type="text" value={vocabScriptUrl} onChange={(e) => { setVocabScriptUrl(e.target.value); localStorage.setItem('vocab_script_url', e.target.value); }} className="w-full px-5 py-4 bg-rose-50 border border-rose-100 rounded-2xl outline-none font-bold text-xs" />
               </div>
             </div>
             <button onClick={() => setShowSyncModal(false)} className="w-full mt-8 py-5 bg-slate-900 text-white rounded-2xl font-black text-[10px] tracking-widest shadow-lg active:scale-95 transition-all uppercase">Lưu cấu hình</button>
