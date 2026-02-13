@@ -55,8 +55,8 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
       if (extractedWords.length > 0) {
         const localManual = JSON.parse(localStorage.getItem(`manual_words_${currentUser}`) || '[]');
         const existingTexts = new Set(localManual.map((m: any) => m.word));
-        const trulyNew = extractedWords.filter(w => !existingTexts.has(w.word));
-        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify([...trulyNew, ...localManual]));
+        const trulyNewWords = extractedWords.filter(w => !existingTexts.has(w.word));
+        localStorage.setItem(`manual_words_${currentUser}`, JSON.stringify([...trulyNewWords, ...localManual]));
       }
 
       saveAndNotify([...newSentences, ...sentences]);
@@ -112,7 +112,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
 
       <div className="space-y-12">
         {currentList.length === 0 ? (
-          <div className="py-20 text-center"><p className="text-slate-300 font-black text-[10px] uppercase tracking-widest">Trống</p></div>
+          <div className="py-20 text-center"><p className="text-slate-300 font-black text-[10px] uppercase tracking-widest">Trống - Hãy bấm Tải về ở Home</p></div>
         ) : currentList.map((s, idx) => (
           <div key={s.id} className="relative animate-in fade-in slide-in-from-bottom-2">
             <div className="flex justify-between items-center mb-5">
@@ -127,11 +127,11 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, sentences
               <h4 className="text-[8px] font-black text-blue-400 uppercase tracking-widest mb-4">TỪ VỰNG</h4>
               <div className="flex flex-wrap gap-x-4 gap-y-7 items-end">
                 {s.words.map((w, wIdx) => (
-                  <div key={wIdx} className="flex flex-col items-center cursor-pointer active:opacity-60 text-center max-w-[80px]" onClick={() => setSelectedWord(w)}>
+                  <div key={wIdx} className="flex flex-col items-center cursor-pointer active:opacity-60 text-center max-w-[90px]" onClick={() => setSelectedWord(w)}>
                     <span className="text-[8px] font-black text-blue-400 uppercase mb-0.5">{w.pinyin}</span>
                     <span className="text-2xl font-black text-slate-950 chinese-font leading-none">{w.text}</span>
-                    <span className="text-[7px] font-black text-slate-400 uppercase mt-1 tracking-tighter">{w.hanViet}</span>
-                    <span className="text-[6px] font-bold text-emerald-600 uppercase mt-0.5 tracking-tight line-clamp-1">{w.meaning}</span>
+                    <span className="text-[8px] font-black text-rose-500 uppercase mt-1 tracking-tighter leading-none">{w.hanViet}</span>
+                    <span className="text-[7px] font-bold text-slate-600 uppercase mt-0.5 tracking-tight line-clamp-1">{w.meaning}</span>
                   </div>
                 ))}
               </div>

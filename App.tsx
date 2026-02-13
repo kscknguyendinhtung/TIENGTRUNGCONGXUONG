@@ -15,6 +15,7 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<string | null>(localStorage.getItem('current_user'));
   const [showSyncModal, setShowSyncModal] = useState(false);
   
+  // State quản lý dữ liệu tập trung để đồng bộ tức thì
   const [sentences, setSentences] = useState<SentenceAnalysis[]>([]);
   const [manualCards, setManualCards] = useState<Flashcard[]>([]);
 
@@ -29,6 +30,7 @@ const App: React.FC = () => {
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [stats, setStats] = useState({ vocabCount: 0, masteredCount: 0, lessonsCount: 0 });
 
+  // 1. Tải dữ liệu từ LocalStorage lên State
   const loadLocalData = useCallback((user: string) => {
     const savedReading = localStorage.getItem(`reading_${user}`);
     const savedVocab = localStorage.getItem(`manual_words_${user}`);
@@ -48,12 +50,13 @@ const App: React.FC = () => {
     setStats({ vocabCount: uniqueWords.size, masteredCount: masteredCount, lessonsCount: parsedReading.length });
   }, []);
 
+  // 2. HÀNH ĐỘNG TẢI VỀ (MANUAL DOWNLOAD)
   const loadCloudData = async (user: string) => {
     if (syncState === 'syncing') return;
     setSyncState('syncing');
     
     try {
-      // TẢI SONG SONG TỪ 2 SCRIPT
+      // Tải song song từ 2 Script
       const [readingRes, vocabRes] = await Promise.all([
         fetchFromScript(readingScriptUrl, user),
         fetchFromScript(vocabScriptUrl, user)
@@ -61,14 +64,14 @@ const App: React.FC = () => {
 
       let updated = false;
 
-      // 1. Xử lý Script 1 (Reading/Grammar)
+      // Xử lý Script 1 (Reading/Grammar)
       if (readingRes && readingRes.reading && Array.isArray(readingRes.reading)) {
         localStorage.setItem(`reading_${user}`, JSON.stringify(readingRes.reading));
-        setSentences([...readingRes.reading]); // Ép cập nhật state
+        setSentences([...readingRes.reading]);
         updated = true;
       }
 
-      // 2. Xử lý Script 2 (Vocabulary/Mastery)
+      // Xử lý Script 2 (Vocabulary/Mastery)
       if (vocabRes && vocabRes.cards && Array.isArray(vocabRes.cards)) {
         const restoredCards: Flashcard[] = vocabRes.cards.map((d: any, i: number) => ({
           id: `cloud-${i}-${Date.now()}`,
@@ -77,7 +80,7 @@ const App: React.FC = () => {
         }));
         
         localStorage.setItem(`manual_words_${user}`, JSON.stringify(restoredCards));
-        setManualCards([...restoredCards]); // Ép cập nhật state
+        setManualCards([...restoredCards]);
         
         const newMastery: Record<string, boolean> = {};
         restoredCards.forEach(c => { if (c.mastered) newMastery[c.word] = true; });
@@ -88,19 +91,23 @@ const App: React.FC = () => {
       if (updated) {
         loadLocalData(user);
         setSyncState('idle');
-      } else if (sheetUrl) {
-        await triggerCloudRestoreFromSheet(user);
+        alert("Đã tải dữ liệu mới nhất từ Cloud!");
       } else {
-        setSyncState('idle');
+        // Fallback về Sheet nếu Script 2 trống
+        if (sheetUrl) {
+            await triggerCloudRestoreFromSheet(user);
+        } else {
+            setSyncState('idle');
+            alert("Không tìm thấy dữ liệu trên Cloud.");
+        }
       }
     } catch (e) {
-      console.error("Lỗi đồng bộ Cloud:", e);
+      console.error("Lỗi khi tải dữ liệu:", e);
       setSyncState('error');
     }
   };
 
   const triggerCloudRestoreFromSheet = async (user: string) => {
-    if (!sheetUrl) return;
     try {
       const cloudData = await fetchPublicSheetCsv(sheetUrl);
       if (cloudData && cloudData.length > 0) {
@@ -113,10 +120,13 @@ const App: React.FC = () => {
         restoredCards.forEach(c => { if (c.mastered) newMastery[c.word] = true; });
         localStorage.setItem(`mastery_${user}`, JSON.stringify(newMastery));
         loadLocalData(user);
+        alert(`Đã tải ${restoredCards.length} từ vựng từ Sheet.`);
       }
+      setSyncState('idle');
     } catch(e) { setSyncState('error'); }
   };
 
+  // 3. HÀNH ĐỘNG ĐỒNG BỘ LÊN (MANUAL/DEBOUNCED SYNC)
   const triggerCloudBackup = useCallback((user: string) => {
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     setSyncState('pending');
@@ -140,12 +150,12 @@ const App: React.FC = () => {
     }, 2000);
   }, [vocabScriptUrl, readingScriptUrl, loadLocalData]);
 
+  // Chỉ load dữ liệu local khi đổi user, KHÔNG tự động pull từ cloud
   useEffect(() => {
     if (currentUser) {
       loadLocalData(currentUser);
-      loadCloudData(currentUser);
     }
-  }, [currentUser]);
+  }, [currentUser, loadLocalData]);
 
   const selectUser = async (user: string) => {
     setCurrentUser(user);
@@ -205,7 +215,7 @@ const App: React.FC = () => {
                 </div>
                 <div>
                   <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-none">Chào, {currentUser}!</h1>
-                  <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mt-1">Hệ thống đồng bộ: {syncState === 'idle' ? 'Sẵn sàng' : 'Đang xử lý'}</p>
+                  <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mt-1">Hệ thống: {syncState === 'idle' ? 'Sẵn sàng' : 'Đang xử lý'}</p>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -228,12 +238,12 @@ const App: React.FC = () => {
                <div className="relative z-10">
                 <div className="flex items-center gap-2.5 mb-3">
                    <div className={`w-2 h-2 rounded-full ${syncState === 'syncing' ? 'bg-amber-400 animate-pulse' : syncState === 'pending' ? 'bg-blue-400' : syncState === 'error' ? 'bg-rose-500' : 'bg-emerald-400'}`}></div>
-                   <h3 className="text-[8px] font-black uppercase tracking-[0.3em] opacity-60">{syncState === 'syncing' ? 'ĐANG TẢI...' : syncState === 'pending' ? 'CHỜ LƯU...' : syncState === 'error' ? 'LỖI ĐỒNG BỘ' : 'CLOUD SYNC'}</h3>
+                   <h3 className="text-[8px] font-black uppercase tracking-[0.3em] opacity-60">{syncState === 'syncing' ? 'ĐANG TẢI...' : syncState === 'pending' ? 'CHỜ LƯU...' : syncState === 'error' ? 'LỖI ĐỒNG BỘ' : 'BẤM TẢI VỀ ĐỂ BẮT ĐẦU'}</h3>
                 </div>
-                <p className="text-xl font-black leading-tight mb-6 max-w-[200px]">Đồng bộ dữ liệu hai chiều giúp bạn học trên mọi thiết bị.</p>
+                <p className="text-xl font-black leading-tight mb-6 max-w-[200px]">Hãy bấm "Tải về" để lấy dữ liệu từ Google Sheets trước khi học.</p>
                 <div className="flex gap-2">
-                    <button onClick={() => triggerCloudBackup(currentUser!)} disabled={syncState === 'syncing'} className="bg-white text-slate-900 px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 flex-1 justify-center disabled:opacity-50 uppercase">Lưu mới</button>
-                    <button onClick={() => loadCloudData(currentUser!)} disabled={syncState === 'syncing'} className="bg-blue-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 flex-1 justify-center disabled:opacity-50 uppercase">Tải về</button>
+                    <button onClick={() => triggerCloudBackup(currentUser!)} disabled={syncState === 'syncing'} className="bg-white text-slate-900 px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 flex-1 justify-center disabled:opacity-50 uppercase">Đồng bộ lên</button>
+                    <button onClick={() => loadCloudData(currentUser!)} disabled={syncState === 'syncing'} className="bg-blue-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95 transition-all flex items-center gap-2.5 flex-1 justify-center disabled:opacity-50 uppercase">Tải về máy</button>
                 </div>
               </div>
             </div>
@@ -273,6 +283,10 @@ const App: React.FC = () => {
               <div>
                 <label className="text-[9px] font-black text-rose-500 uppercase tracking-widest ml-1 mb-2 block">Script 2 (Nhẹ: Vocab/Mastery)</label>
                 <input type="text" value={vocabScriptUrl} onChange={(e) => { setVocabScriptUrl(e.target.value); localStorage.setItem('vocab_script_url', e.target.value); }} className="w-full px-5 py-4 bg-rose-50 border border-rose-100 rounded-2xl outline-none font-bold text-xs" />
+              </div>
+              <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Google Sheets CSV (Backup)</label>
+                <input type="text" value={sheetUrl} onChange={(e) => { setSheetUrl(e.target.value); localStorage.setItem(`sheet_url_${currentUser}`, e.target.value); }} className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs" />
               </div>
             </div>
             <button onClick={() => setShowSyncModal(false)} className="w-full mt-8 py-5 bg-slate-900 text-white rounded-2xl font-black text-[10px] tracking-widest shadow-lg active:scale-95 transition-all uppercase">Lưu cấu hình</button>
