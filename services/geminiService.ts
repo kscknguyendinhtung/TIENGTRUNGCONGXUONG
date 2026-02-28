@@ -2,10 +2,10 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { SentenceAnalysis, MindmapCategory, Flashcard } from "../types";
 
-// Always use const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 // --- BACKGROUND AUDIO HACK FOR IOS ---
+// A tiny silent MP3 file in base64 to keep the Audio Session active
 const SILENT_AUDIO_BASE64 = "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//oeAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//////////////////////////////////////////////////////////////////wAAAD9MYXZjNTguMTM0AAAAAAAAAAAAAAAAJAAAAAAAAAAAASAAAAAAAASQAAAAJlAAAA8AAAAA//oeZAAAAABiAAAAAAAAAAARAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAA//oeZAAAAABiAAAAAAAAAAARAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAA//oeZAAAAABiAAAAAAAAAAARAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAA//oeZAAAAABiAAAAAAAAAAARAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAA//oeZAAAAABiAAAAAAAAAAARAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAA";
 
 let backgroundAudio: HTMLAudioElement | null = null;
@@ -15,9 +15,21 @@ export const toggleBackgroundMode = (enable: boolean) => {
     if (!backgroundAudio) {
       backgroundAudio = new Audio(SILENT_AUDIO_BASE64);
       backgroundAudio.loop = true;
-      backgroundAudio.volume = 0.01;
+      backgroundAudio.volume = 0.01; // Non-zero volume is important for iOS
     }
     backgroundAudio.play().catch(e => console.log("Bg Audio play failed", e));
+    
+    // Media Session API to show controls on Lock Screen (Optional but helpful)
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'Zhongwen Master',
+        artist: 'Đang chạy ngầm...',
+        album: 'Luyện nghe thụ động',
+        artwork: [{ src: 'https://via.placeholder.com/512', sizes: '512x512', type: 'image/png' }]
+      });
+      navigator.mediaSession.setActionHandler('play', () => backgroundAudio?.play());
+      navigator.mediaSession.setActionHandler('pause', () => backgroundAudio?.pause());
+    }
   } else {
     if (backgroundAudio) {
       backgroundAudio.pause();
@@ -25,7 +37,9 @@ export const toggleBackgroundMode = (enable: boolean) => {
     }
   }
 };
+// -------------------------------------
 
+// Helper to clean JSON string from Markdown code blocks
 const cleanJsonString = (text: string): string => {
   if (!text) return "[]";
   let clean = text.trim();
@@ -35,10 +49,37 @@ const cleanJsonString = (text: string): string => {
   return clean;
 };
 
+// Helper: Robust CSV Parser
+const parseCSV = (str: string) => {
+  const arr: string[][] = [];
+  let quote = false;
+  let col = 0, row = 0;
+
+  for (let c = 0; c < str.length; c++) {
+    const cc = str[c], nc = str[c + 1];
+    arr[row] = arr[row] || [];
+    arr[row][col] = arr[row][col] || '';
+
+    if (cc == '"' && quote && nc == '"') { arr[row][col] += cc; ++c; continue; }
+    if (cc == '"') { quote = !quote; continue; }
+    if (cc == ',' && !quote) { ++col; continue; }
+    if (cc == '\r' && nc == '\n' && !quote) { ++row; col = 0; ++c; continue; }
+    if (cc == '\n' && !quote) { ++row; col = 0; continue; }
+    if (cc == '\r' && !quote) { ++row; col = 0; continue; }
+
+    arr[row][col] += cc;
+  }
+  return arr;
+};
+
 // --- SYNC FUNCTION 1: READING & GRAMMAR (Script 1) ---
 export const syncReadingData = async (scriptUrl: string, user: string, readingData: SentenceAnalysis[]) => {
   if (!scriptUrl || !scriptUrl.startsWith("http")) return false;
-  const payload = { user: user, action: 'save_reading', reading: readingData };
+  const payload = {
+    user: user,
+    action: 'save_reading', // Tag action for script handling
+    reading: readingData
+  };
   try {
     await fetch(scriptUrl, { 
       method: 'POST', 
@@ -47,7 +88,7 @@ export const syncReadingData = async (scriptUrl: string, user: string, readingDa
       body: JSON.stringify(payload) 
     });
     return true;
-  } catch (e) { return false; }
+  } catch (e) { console.error("Reading Sync Error", e); return false; }
 };
 
 // --- SYNC FUNCTION 2: VOCABULARY (Script 2) ---
@@ -55,10 +96,14 @@ export const syncVocabData = async (scriptUrl: string, user: string, cards: Flas
   if (!scriptUrl || !scriptUrl.startsWith("http")) return false;
   const payload = {
     user: user,
-    action: 'save_vocab',
+    action: 'save_vocab', // Tag action for script handling
     cards: cards.map(c => ({
-      word: c.word, pinyin: c.pinyin, hanViet: c.hanViet, meaning: c.meaning,
-      category: c.category || 'Khác', mastered: c.mastered || false
+      word: c.word,
+      pinyin: c.pinyin,
+      hanViet: c.hanViet,
+      meaning: c.meaning,
+      category: c.category || 'Khác',
+      mastered: c.mastered || false
     }))
   };
   try {
@@ -69,71 +114,64 @@ export const syncVocabData = async (scriptUrl: string, user: string, cards: Flas
       body: JSON.stringify(payload) 
     });
     return true;
-  } catch (e) { return false; }
+  } catch (e) { console.error("Vocab Sync Error", e); return false; }
 };
 
-// --- FETCH FROM SCRIPT (Sửa lỗi tải về) ---
+// --- GENERIC FETCH FUNCTION (GET) ---
 export const fetchFromScript = async (scriptUrl: string, user: string) => {
   if (!scriptUrl || !scriptUrl.startsWith("http")) return null;
   try {
+    // Add timestamp to avoid caching
     const url = `${scriptUrl}?user=${encodeURIComponent(user)}&action=get&_t=${Date.now()}`;
-    const response = await fetch(url, { method: 'GET' });
+    const response = await fetch(url, {
+        method: 'GET',
+        credentials: 'omit', // Fixes CORS issues with multiple Google accounts
+    });
+    
     if (!response.ok) return null;
     const text = await response.text();
-    // Google Apps Script trả về HTML nếu có lỗi quyền hoặc redirect
-    if (text.trim().startsWith("<")) {
-      console.warn("Script returned HTML instead of JSON. Check access permissions.");
-      return null;
-    }
+    // HTML returned means error page from Google
+    if (text.trim().startsWith("<")) return null; 
+    
     return JSON.parse(text);
   } catch (e) {
-    console.warn("Fetch Error:", e);
+    console.warn(`Fetch Error for ${scriptUrl}`, e);
     return null;
   }
 };
 
-/**
- * Fetches vocabulary data from a public Google Sheet CSV export.
- * If the URL is an 'edit' link, it is converted to an 'export?format=csv' link.
- */
+// ... existing code ...
 export const fetchPublicSheetCsv = async (sheetUrl: string): Promise<any[]> => {
-  if (!sheetUrl || !sheetUrl.startsWith("http")) return [];
   try {
-    let url = sheetUrl;
-    if (url.includes('/edit')) {
-      url = url.replace(/\/edit.*$/, '/export?format=csv');
-    } else if (url.includes('docs.google.com/spreadsheets/d/') && !url.includes('format=csv')) {
-      const idMatch = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
-      if (idMatch) {
-        url = `https://docs.google.com/spreadsheets/d/${idMatch[1]}/export?format=csv`;
+    const match = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    if (!match) throw new Error("URL Sheet không hợp lệ");
+    const sheetId = match[1];
+    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+
+    const response = await fetch(csvUrl);
+    if (!response.ok) throw new Error("Không thể truy cập Sheet.");
+    
+    const text = await response.text();
+    const rows = parseCSV(text);
+    const data = [];
+    const startRow = (rows[0] && (rows[0][0].includes("Hán tự") || rows[0][0].includes("Word"))) ? 1 : 0;
+
+    for (let i = startRow; i < rows.length; i++) {
+      const col = rows[i];
+      if (col.length >= 4 && col[0]) {
+        data.push({
+          word: col[0],
+          pinyin: col[1],
+          hanViet: col[2],
+          meaning: col[3],
+          category: col[4] || 'Khác',
+          mastered: (col[5] && (col[5].toLowerCase() === 'true' || col[5] === '1')) || false
+        });
       }
     }
-
-    const response = await fetch(url);
-    if (!response.ok) return [];
-    const csvText = await response.text();
-    
-    // Basic CSV parsing for standard format with header
-    const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== "");
-    if (lines.length < 2) return [];
-
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-    
-    return lines.slice(1).map(line => {
-      const values = line.split(',');
-      const obj: any = {};
-      headers.forEach((header, index) => {
-        let val = values[index]?.trim() || "";
-        if (header === 'mastered') {
-          obj[header] = val.toLowerCase() === 'true' || val === '1';
-        } else {
-          obj[header] = val;
-        }
-      });
-      return obj;
-    });
+    return data;
   } catch (e) {
-    console.error("fetchPublicSheetCsv error:", e);
+    console.error("CSV Fetch Error:", e);
     return [];
   }
 };
@@ -142,14 +180,24 @@ export const extractVocabulary = async (input: { text?: string, imageBase64?: st
   const parts: any[] = [];
   if (input.imageBase64) {
     parts.push({ inlineData: { data: input.imageBase64, mimeType: 'image/jpeg' } });
-    parts.push({ text: "OCR hình ảnh này và trích xuất danh sách từ vựng chuẩn." });
+    parts.push({ text: "OCR hình ảnh này và trích xuất toàn bộ từ vựng tiếng Trung quan trọng." });
   } else if (input.text) {
-    parts.push({ text: `Phân tích từ vựng: \n${input.text}` });
+    parts.push({ text: `Phân tích danh sách từ vựng này: \n${input.text}` });
   }
+
   parts.push({
-    text: `Trả về JSON Array: {text, pinyin, hanViet, meaning, category (Danh từ, Động từ, Tính từ, Mẫu câu, Sản xuất, Chất lượng, Nhân sự, Văn phòng, Khác)}.`
+    text: `
+    NHIỆM VỤ: Chuyển đổi dữ liệu đầu vào thành danh sách từ vựng JSON chuẩn.
+    YÊU CẦU ĐẦU RA CHO MỖI TỪ (JSON Object):
+    - text: Chữ Hán (Giản thể).
+    - pinyin: Pinyin chuẩn có dấu thanh.
+    - hanViet: Âm Hán Việt.
+    - meaning: Nghĩa tiếng Việt ngắn gọn, súc tích.
+    - category: Tự động phân loại chính xác vào 1 trong các nhóm: 
+       "Danh từ", "Động từ", "Tính từ", "Mẫu câu", "Sản xuất" (SMT, Máy móc), "Chất lượng" (QC/QA), "Nhân sự", "Văn phòng", "Khác".
+    `
   });
-  
+
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: { parts },
@@ -170,16 +218,26 @@ export const extractVocabulary = async (input: { text?: string, imageBase64?: st
       }
     }
   });
+
   try {
-    return JSON.parse(cleanJsonString(response.text || "[]"));
-  } catch (e) { return []; }
+    const jsonStr = cleanJsonString(response.text || "[]");
+    return JSON.parse(jsonStr);
+  } catch (e) {
+    console.error("Lỗi parse từ vựng:", e);
+    return [];
+  }
 };
 
 export const analyzeImageAndExtractText = async (base64Images: string[]): Promise<SentenceAnalysis[]> => {
-  const imageParts = base64Images.map(base64 => ({ inlineData: { data: base64, mimeType: 'image/jpeg' } }));
+  const imageParts = base64Images.map(base64 => ({
+    inlineData: { data: base64, mimeType: 'image/jpeg' }
+  }));
+
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview', 
-    contents: { parts: [...imageParts, { text: "OCR và phân tích ngữ pháp tiếng Trung chuyên sâu." }] },
+    contents: {
+      parts: [...imageParts, { text: `NHIỆM VỤ: OCR tiếng Trung và phân tích từ vựng/ngữ pháp chi tiết.` }]
+    },
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -209,15 +267,18 @@ export const analyzeImageAndExtractText = async (base64Images: string[]): Promis
       }
     }
   });
+
   try {
-    return JSON.parse(cleanJsonString(response.text || "[]"));
+    const jsonStr = cleanJsonString(response.text || "[]");
+    return JSON.parse(jsonStr);
   } catch (e) { return []; }
 };
 
 export const generateMindmap = async (words: {text: string, pinyin: string, meaning: string, hanViet: string}[]): Promise<MindmapCategory[]> => {
+  const wordList = words.map(w => w.text).join(', ');
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
-    contents: `Phân loại từ vựng vào các nhóm logic: ${JSON.stringify(words)}`,
+    contents: `NHIỆM VỤ: Phân loại danh sách từ vựng vào các nhóm cây thư mục logic (Ngữ pháp, Chuyên ngành). Từ vựng: ${wordList}`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -230,25 +291,65 @@ export const generateMindmap = async (words: {text: string, pinyin: string, mean
               type: Type.ARRAY,
               items: { type: Type.OBJECT, properties: { text: { type: Type.STRING } } }
             }
-          }
+          },
+          required: ["name", "words"]
         }
       }
     }
   });
+
   try {
-    return JSON.parse(cleanJsonString(response.text || "[]"));
+    const jsonStr = cleanJsonString(response.text || "[]");
+    return JSON.parse(jsonStr);
   } catch (e) { return []; }
 };
+
+// Global reference to prevent GC
+const activeUtterances: SpeechSynthesisUtterance[] = [];
 
 export const speakText = (text: string, lang: 'cn' | 'vn', speed: number = 1.0) => {
   if (!('speechSynthesis' in window)) return;
   const synth = window.speechSynthesis;
+  
   if (synth.paused) synth.resume();
+  
+  // Do NOT cancel here if we want to queue sentences or if in background mode
+  // synth.cancel(); 
+
   const utterance = new SpeechSynthesisUtterance(text.trim());
   utterance.rate = speed;
-  utterance.lang = lang === 'cn' ? 'zh-CN' : 'vi-VN';
+  utterance.volume = 1.0; 
+
+  if (lang === 'cn') {
+    utterance.lang = 'zh-CN';
+  } else {
+    utterance.lang = 'vi-VN';
+  }
+
   const voices = synth.getVoices();
-  const voice = voices.find(v => v.lang.startsWith(lang === 'cn' ? 'zh' : 'vi'));
-  if (voice) utterance.voice = voice;
+  if (voices.length > 0) {
+    let selectedVoice = null;
+    if (lang === 'cn') {
+        selectedVoice = voices.find(v => v.lang === 'zh-CN' && !v.name.includes("Siri")) || 
+                        voices.find(v => v.lang === 'zh-CN') || 
+                        voices.find(v => v.lang.startsWith('zh')); 
+    } else {
+        selectedVoice = voices.find(v => v.lang === 'vi-VN') || 
+                        voices.find(v => v.lang.startsWith('vi'));
+    }
+    if (selectedVoice) utterance.voice = selectedVoice;
+  }
+
+  // Anti-GC trick: keep reference
+  activeUtterances.push(utterance);
+  utterance.onend = () => {
+    const index = activeUtterances.indexOf(utterance);
+    if (index > -1) activeUtterances.splice(index, 1);
+  };
+
   synth.speak(utterance);
 };
+
+// Remove old functions to avoid confusion
+export const syncToGoogleSheets = async (scriptUrl: string, data: any) => { return false; };
+export const syncUserSheet = async (scriptUrl: string, user: string, cards: any[], reading: any[]) => { return false; };
