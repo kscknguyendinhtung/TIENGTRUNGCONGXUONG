@@ -79,6 +79,7 @@ export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser, onDataCha
                   <span className="text-[8px] text-rose-500 font-black mb-1 uppercase tracking-tighter leading-none">{w.pinyin}</span>
                   <span className="text-2xl font-black chinese-font leading-none">{w.text}</span>
                   <span className="text-[8px] text-slate-300 font-bold uppercase mt-1 tracking-widest leading-none">{w.hanViet}</span>
+                  {w.phonetic && <span className="text-[7px] text-orange-500 font-black mt-0.5 uppercase tracking-tighter leading-none">({w.phonetic})</span>}
                 </div>
               ))}
             </div>
@@ -108,7 +109,8 @@ export const GrammarView: React.FC<GrammarViewProps> = ({ currentUser, onDataCha
             <h3 className="text-6xl font-black mb-5 chinese-font text-slate-800 tracking-tighter">{selectedWord.text}</h3>
             <div className="flex flex-col items-center gap-0.5 mb-6">
               <p className="text-emerald-600 font-black text-xl uppercase tracking-tighter">{selectedWord.pinyin}</p>
-              <p className="text-rose-500 font-black text-lg uppercase tracking-[0.1em]">{selectedWord.hanViet}</p>
+              <p className="text-rose-500 font-black text-lg uppercase tracking-[0.1em] leading-none">{selectedWord.hanViet}</p>
+              {selectedWord.phonetic && <p className="text-orange-500 font-black text-sm uppercase tracking-widest">({selectedWord.phonetic})</p>}
             </div>
             <p className="text-slate-600 text-lg font-bold mb-8 leading-snug">{selectedWord.meaning}</p>
             <div className="grid grid-cols-2 gap-3">

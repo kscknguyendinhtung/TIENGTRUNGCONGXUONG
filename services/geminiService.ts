@@ -165,7 +165,8 @@ export const fetchPublicSheetCsv = async (sheetUrl: string): Promise<any[]> => {
           hanViet: col[2],
           meaning: col[3],
           category: col[4] || 'Khác',
-          mastered: (col[5] && (col[5].toLowerCase() === 'true' || col[5] === '1')) || false
+          mastered: (col[5] && (col[5].toLowerCase() === 'true' || col[5] === '1')) || false,
+          phonetic: col[6] || ''
         });
       }
     }
@@ -192,6 +193,7 @@ export const extractVocabulary = async (input: { text?: string, imageBase64?: st
     - text: Chữ Hán (Giản thể).
     - pinyin: Pinyin chuẩn có dấu thanh.
     - hanViet: Âm Hán Việt.
+    - phonetic: Phiên âm bồi (Vietnamese transliteration) dựa trên pinyin và ngữ âm tiếng Việt phương Bắc (ví dụ: "nǐ hǎo" -> "ní hảo").
     - meaning: Nghĩa tiếng Việt ngắn gọn, súc tích.
     - category: Tự động phân loại chính xác vào 1 trong các nhóm: 
        "Danh từ", "Động từ", "Tính từ", "Mẫu câu", "Sản xuất" (SMT, Máy móc), "Chất lượng" (QC/QA), "Nhân sự", "Văn phòng", "Khác".
@@ -212,6 +214,7 @@ export const extractVocabulary = async (input: { text?: string, imageBase64?: st
             pinyin: { type: Type.STRING },
             meaning: { type: Type.STRING },
             hanViet: { type: Type.STRING },
+            phonetic: { type: Type.STRING },
             category: { type: Type.STRING }
           }
         }
@@ -236,7 +239,8 @@ export const analyzeImageAndExtractText = async (base64Images: string[]): Promis
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview', 
     contents: {
-      parts: [...imageParts, { text: `NHIỆM VỤ: OCR tiếng Trung và phân tích từ vựng/ngữ pháp chi tiết.` }]
+      parts: [...imageParts, { text: `NHIỆM VỤ: OCR tiếng Trung và phân tích từ vựng/ngữ pháp chi tiết. 
+      YÊU CẦU: Với mỗi từ vựng trích xuất, hãy thêm trường "phonetic" là phiên âm bồi dựa trên pinyin và ngữ âm tiếng Việt phương Bắc.` }]
     },
     config: {
       responseMimeType: "application/json",
@@ -258,6 +262,7 @@ export const analyzeImageAndExtractText = async (base64Images: string[]): Promis
                   pinyin: { type: Type.STRING },
                   meaning: { type: Type.STRING },
                   hanViet: { type: Type.STRING },
+                  phonetic: { type: Type.STRING },
                   category: { type: Type.STRING }
                 }
               }
@@ -274,11 +279,13 @@ export const analyzeImageAndExtractText = async (base64Images: string[]): Promis
   } catch (e) { return []; }
 };
 
-export const generateMindmap = async (words: {text: string, pinyin: string, meaning: string, hanViet: string}[]): Promise<MindmapCategory[]> => {
+export const generateMindmap = async (words: {text: string, pinyin: string, meaning: string, hanViet: string, phonetic?: string}[]): Promise<MindmapCategory[]> => {
   const wordList = words.map(w => w.text).join(', ');
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
-    contents: `NHIỆM VỤ: Phân loại danh sách từ vựng vào các nhóm cây thư mục logic (Ngữ pháp, Chuyên ngành). Từ vựng: ${wordList}`,
+    contents: `NHIỆM VỤ: Phân loại danh sách từ vựng vào các nhóm cây thư mục logic (Ngữ pháp, Chuyên ngành). 
+    YÊU CẦU: Với mỗi từ vựng, hãy giữ nguyên các trường thông tin và thêm trường "phonetic" là phiên âm bồi dựa trên pinyin và ngữ âm tiếng Việt phương Bắc.
+    Từ vựng: ${wordList}`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {

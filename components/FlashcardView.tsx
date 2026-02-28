@@ -107,6 +107,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
                 pinyin: w.pinyin,
                 meaning: w.meaning,
                 hanViet: w.hanViet || '',
+                phonetic: w.phonetic || '',
                 category: finalCategory,
                 mastered: localMastery[w.text] || false
               });
@@ -322,6 +323,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
           pinyin: w.pinyin,
           meaning: w.meaning,
           hanViet: w.hanViet,
+          phonetic: w.phonetic,
           category: w.category,
           isManual: true,
           mastered: false
@@ -366,8 +368,9 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
             word: word,
             pinyin: parts[1]?.trim() || '',
             hanViet: parts[2]?.trim() || '',
-            meaning: parts[3]?.trim() || '',
-            category: parts[4]?.trim() || 'Khác',
+            phonetic: parts[3]?.trim() || '',
+            meaning: parts[4]?.trim() || '',
+            category: parts[5]?.trim() || 'Khác',
             mastered: false,
             isManual: true
         });
@@ -437,6 +440,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
         word: d.word,
         pinyin: d.pinyin,
         hanViet: d.hanViet,
+        phonetic: d.phonetic,
         meaning: d.meaning,
         category: d.category,
         isManual: true,
@@ -615,6 +619,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
                   <>
                     <h1 className="text-7xl font-black text-slate-950 chinese-font mb-4 tracking-tighter">{currentCard.word}</h1>
                     <p className="text-xl text-blue-600 font-black uppercase tracking-tighter">{currentCard.pinyin}</p>
+                    {currentCard.phonetic && <p className="text-sm text-orange-500 font-black uppercase mt-1 tracking-widest">({currentCard.phonetic})</p>}
                     <button onClick={(e) => { e.stopPropagation(); speakText(currentCard.word, 'cn', playbackSpeed); }} className="mt-8 w-12 h-12 flex items-center justify-center bg-slate-50 text-slate-400 rounded-xl hover:bg-blue-50 hover:text-blue-600 transition-all border border-slate-100"><svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg></button>
                   </>
                 ) : (
@@ -631,7 +636,8 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
                 {frontMode === 'chinese' ? (
                   <>
                     <p className="text-blue-400 font-black text-[8px] uppercase tracking-[0.3em] mb-2">Hán Việt</p>
-                    <h2 className="text-3xl font-black mb-6 uppercase tracking-tighter text-blue-100">{currentCard.hanViet}</h2>
+                    <h2 className="text-3xl font-black mb-1 uppercase tracking-tighter text-blue-100">{currentCard.hanViet}</h2>
+                    {currentCard.phonetic && <p className="text-sm text-orange-500 font-black uppercase mb-6 tracking-widest">({currentCard.phonetic})</p>}
                     <div className="w-12 h-0.5 bg-slate-800 rounded-full mb-6"></div>
                     <p className="text-emerald-400 font-black text-[8px] uppercase tracking-[0.3em] mb-2">Dịch Nghĩa</p>
                     <h2 className="text-2xl font-black tracking-tight leading-tight">{currentCard.meaning}</h2>
@@ -640,7 +646,8 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
                   <>
                     <h1 className="text-7xl font-black text-white chinese-font mb-4 tracking-tighter">{currentCard.word}</h1>
                     <p className="text-xl text-rose-500 font-black uppercase tracking-widest mb-2">{currentCard.pinyin}</p>
-                    <p className="text-blue-400 font-black text-lg uppercase tracking-widest">{currentCard.hanViet}</p>
+                    {currentCard.phonetic && <p className="text-sm text-orange-500 font-black uppercase mb-2 tracking-widest">({currentCard.phonetic})</p>}
+                    <p className="text-blue-400 font-black text-lg uppercase tracking-widest leading-none">{currentCard.hanViet}</p>
                   </>
                 )}
               </div>
@@ -696,7 +703,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
           <div className="grid grid-cols-12 gap-1 px-4 py-3 bg-slate-100 rounded-t-xl text-[8px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200">
              <div className="col-span-2">Hán tự</div>
              <div className="col-span-2">Pinyin</div>
-             <div className="col-span-2">Hán Việt</div>
+             <div className="col-span-2">Phát âm bồi</div>
              <div className="col-span-4">Nghĩa</div>
              <div className="col-span-2 text-right">Trạng thái</div>
           </div>
@@ -721,6 +728,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
                </div>
                <div className="col-span-2">
                  <span className="text-[9px] font-bold text-blue-500 truncate block">{card.hanViet}</span>
+                 {card.phonetic && <span className="text-[7px] font-black text-orange-500 truncate block">({card.phonetic})</span>}
                </div>
                <div className="col-span-4">
                  <span className="text-[9px] font-bold text-slate-600 line-clamp-2 leading-tight">{card.meaning}</span>
@@ -788,7 +796,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ currentUser, onDat
       {showMindmap && (
         <MindmapView 
           user={currentUser} 
-          words={cards.map(c => ({ text: c.word, pinyin: c.pinyin, meaning: c.meaning, hanViet: c.hanViet }))} 
+          words={cards.map(c => ({ text: c.word, pinyin: c.pinyin, meaning: c.meaning, hanViet: c.hanViet, phonetic: c.phonetic }))} 
           onClose={() => {
             setShowMindmap(false);
             loadCards();

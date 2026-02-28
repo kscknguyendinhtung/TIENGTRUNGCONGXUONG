@@ -8,6 +8,7 @@ interface WordData {
   pinyin: string;
   meaning: string;
   hanViet: string;
+  phonetic?: string;
 }
 
 interface MindmapViewProps {
@@ -248,7 +249,15 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ words, user, onClose }
                                    <span className="text-[10px] font-black bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full uppercase leading-none tracking-tighter">{w.hanViet || '---'}</span>
                                 </div>
 
-                                {/* Line 4: Nghĩa Việt */}
+                                {/* Line 4: Phiên âm bồi */}
+                                {w.phonetic && (
+                                  <div className="flex items-center gap-2">
+                                     <span className="text-[7px] font-black text-slate-300 uppercase tracking-widest w-12 shrink-0">Bồi</span>
+                                     <span className="text-[10px] font-black text-orange-500 uppercase leading-none tracking-tighter">({w.phonetic})</span>
+                                  </div>
+                                )}
+
+                                {/* Line 5: Nghĩa Việt */}
                                 <div className="flex items-start gap-2 pt-0.5">
                                    <span className="text-[7px] font-black text-slate-300 uppercase tracking-widest w-12 shrink-0 mt-0.5">Nghĩa</span>
                                    <p className="text-[12px] font-bold text-slate-600 leading-tight">{w.meaning || '---'}</p>

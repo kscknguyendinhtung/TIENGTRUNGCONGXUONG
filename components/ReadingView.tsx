@@ -161,6 +161,7 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
                     <span className="text-[8px] font-black text-blue-400 uppercase mb-0.5">{w.pinyin}</span>
                     <span className="text-2xl font-black text-slate-950 chinese-font leading-none">{w.text}</span>
                     <span className="text-[7px] font-black text-slate-300 uppercase mt-1 tracking-tighter">{w.hanViet}</span>
+                    {w.phonetic && <span className="text-[7px] font-black text-orange-500 uppercase mt-0.5 tracking-tighter">({w.phonetic})</span>}
                   </div>
                 ))}
               </div>
@@ -192,7 +193,8 @@ export const ReadingView: React.FC<ReadingViewProps> = ({ currentUser, onDataCha
             <h3 className="text-6xl font-black mb-6 chinese-font text-slate-950 tracking-tighter">{selectedWord.text}</h3>
             <div className="flex flex-col gap-1 mb-6">
               <span className="text-blue-600 font-black text-xl uppercase tracking-tighter">{selectedWord.pinyin}</span>
-              <span className="text-rose-500 font-black text-lg uppercase tracking-widest">{selectedWord.hanViet}</span>
+              <span className="text-rose-500 font-black text-lg uppercase tracking-widest leading-none">{selectedWord.hanViet}</span>
+              {selectedWord.phonetic && <span className="text-orange-500 font-black text-sm uppercase tracking-widest">({selectedWord.phonetic})</span>}
             </div>
             <p className="text-slate-600 text-lg font-bold mb-8 leading-tight">{selectedWord.meaning}</p>
             <div className="flex gap-3">
